@@ -43,4 +43,16 @@ public interface LlmClient {
 
     record Usage(int promptTokens, int completionTokens, int totalTokens) {
     }
+
+    /**
+     * 图片分析（视觉模型）。
+     *
+     * @param imageBase64 图片 base64 编码（不含 data URI 前缀）
+     * @param mimeType    MIME 类型，如 image/jpeg、image/png
+     * @param prompt      文字提示词
+     * @return 模型返回的文本内容
+     */
+    default String analyzeImage(String imageBase64, String mimeType, String prompt) {
+        throw new UnsupportedOperationException("Provider '" + provider() + "' 不支持图像分析");
+    }
 }

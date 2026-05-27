@@ -24,6 +24,7 @@ app:
     refresh-ttl-days: 30
   ai:
     default-provider: deepseek
+    vision-provider: qwen-vl
     providers:
       deepseek:
         base-url: https://api.deepseek.com
@@ -36,4 +37,8 @@ app:
       qwen:
         base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
         model: qwen-plus
+        api-key: ${QWEN_API_KEY:}
+      qwen-vl:
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        model: qwen-vl-plus
         api-key: ${QWEN_API_KEY:}

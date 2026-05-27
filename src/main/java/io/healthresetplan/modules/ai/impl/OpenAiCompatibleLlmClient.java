@@ -96,6 +96,45 @@ public abstract class OpenAiCompatibleLlmClient implements LlmClient {
         }
     }
 
+    @Override
+    public String analyzeImage(String imageBase64, String mimeType, String prompt) {
+        String model = config.getModel();
+
+        List<Object> contentParts = List.of(
+                java.util.Map.of("type", "text", "text", prompt),
+                java.util.Map.of("type", "image_url", "image_url",
+                        java.util.Map.of("url", "data:" + mimeType + ";base64," + imageBase64))
+        );
+
+        Map<String, Object> body = Map.of(
+                "model", model,
+                "messages", List.of(Map.of("role", "user", "content", contentParts)),
+                "max_tokens", 4096
+        );
+
+        try {
+            String response = restClient.post()
+                    .uri("/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .body(String.class);
+
+            Map<String, Object> map = OBJECT_MAPPER.readValue(response, Map.class);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> choices = (List<Map<String, Object>>) map.getOrDefault("choices", List.of());
+            if (!choices.isEmpty()) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+                return String.valueOf(message != null ? message.get("content") : "");
+            }
+            return "";
+        } catch (Exception e) {
+            log.error("视觉分析失败 provider={} model={}", provider, model, e);
+            throw new BusinessException(50301, "视觉 AI 服务暂不可用：" + provider);
+        }
+    }
+
     @SuppressWarnings("unused")
     protected Duration timeout() {
         return Duration.ofSeconds(60);

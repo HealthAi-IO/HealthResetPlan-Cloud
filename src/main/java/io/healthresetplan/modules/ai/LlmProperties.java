@@ -12,6 +12,8 @@ import java.util.Map;
 public class LlmProperties {
 
     private String defaultProvider = "deepseek";
+    /** 用于图像分析的视觉模型 provider，默认 qwen-vl */
+    private String visionProvider = "qwen-vl";
     private Map<String, ProviderConfig> providers = new HashMap<>();
 
     public String getDefaultProvider() {
@@ -20,6 +22,14 @@ public class LlmProperties {
 
     public void setDefaultProvider(String defaultProvider) {
         this.defaultProvider = defaultProvider;
+    }
+
+    public String getVisionProvider() {
+        return visionProvider;
+    }
+
+    public void setVisionProvider(String visionProvider) {
+        this.visionProvider = visionProvider;
     }
 
     public Map<String, ProviderConfig> getProviders() {

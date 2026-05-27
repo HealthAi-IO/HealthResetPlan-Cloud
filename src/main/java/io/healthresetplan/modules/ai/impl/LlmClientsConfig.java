@@ -39,4 +39,14 @@ public class LlmClientsConfig {
         }
         return new OpenAiCompatibleLlmClient("qwen", cfg) {};
     }
+
+    /** qwen-vl：通义千问视觉语言模型，用于体检报告图片解析 */
+    @Bean("qwenVlLlmClient")
+    public LlmClient qwenVlLlmClient(LlmProperties properties) {
+        LlmProperties.ProviderConfig cfg = properties.getProviders().get("qwen-vl");
+        if (cfg == null || cfg.getBaseUrl() == null) {
+            return null;
+        }
+        return new OpenAiCompatibleLlmClient("qwen-vl", cfg) {};
+    }
 }
