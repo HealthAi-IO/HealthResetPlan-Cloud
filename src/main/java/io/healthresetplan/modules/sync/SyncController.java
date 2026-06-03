@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 端到端加密同步入口。
+ * 客户端加密同步入口。
  *
  * <p>服务端不持有用户主密钥，对 cipher / iv / tag 不做解密，仅做"管道"。</p>
  * <p>push / pull 均需有效的云同步会员权益。</p>

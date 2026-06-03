@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 端到端加密同步服务。
+ * 客户端加密同步服务。
  *
  * <p>push 实现"幂等 upsert + 客户端版本胜出"：
  * 若服务端已有该 client_id 且版本更高，则服务端不覆盖（客户端下次 pull 后会更新本地）。</p>

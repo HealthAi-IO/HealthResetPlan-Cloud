@@ -18,27 +18,27 @@ spring:
     encoding: UTF-8
 
 app:
+  files:
+    # 加密文件本地存储根目录（后续可换 OSS，只改此处）
+    storage-path: ${FILES_STORAGE_PATH:/home/lyt/hrp-uploads}
   jwt:
     secret: ${JWT_SECRET:replace-me-in-real-env-please-replace-me-please}
     access-ttl-minutes: 60
     refresh-ttl-days: 30
   ai:
-    default-provider: deepseek
-    vision-provider: qwen-vl
-    providers:
-      deepseek:
-        base-url: https://api.deepseek.com
-        model: deepseek-chat
-        api-key: ${DEEPSEEK_API_KEY:}
-      doubao:
-        base-url: https://ark.cn-beijing.volces.com/api/v3
-        model: doubao-pro-32k
-        api-key: ${DOUBAO_API_KEY:}
-      qwen:
-        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-        model: qwen-plus
-        api-key: ${QWEN_API_KEY:}
-      qwen-vl:
-        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-        model: qwen-vl-plus
-        api-key: ${QWEN_API_KEY:}
+    one-api:
+      # 本地 OneAPI 实例地址（不带 /v1 结尾，SDK 自动补全）
+      base-url: ${ONE_API_BASE_URL:http://localhost:3000}
+      # OneAPI 统一接入 key（在 OneAPI 控制台 → 令牌 中创建）
+      api-key: ${ONE_API_KEY:sk-HealthResetPlan}
+      # 对话/计划生成模型优先级（依次降级）
+      chat-models:
+        - qwen-turbo
+        - doubao-lite
+        - deepseek-chat
+      # 体检报告 OCR 视觉模型
+      vision-model: ${ONE_API_VISION_MODEL:qwen-vl-plus}
+      # 单用户每日最大请求次数（与 OneAPI 后台配置保持一致）
+      daily-limit: 30
+      # 请求超时秒数
+      timeout-seconds: 90

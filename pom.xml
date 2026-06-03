@@ -23,6 +23,7 @@
         <mybatis-plus.version>3.5.9</mybatis-plus.version>
         <springdoc.version>2.6.0</springdoc.version>
         <jjwt.version>0.12.6</jjwt.version>
+        <openai.version>2.1.0</openai.version>
     </properties>
 
     <dependencies>
@@ -102,6 +103,13 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
+        </dependency>
+
+        <!-- OpenAI 官方 Java SDK（兼容 OneAPI / 任意 OpenAI 协议代理） -->
+        <dependency>
+            <groupId>com.openai</groupId>
+            <artifactId>openai-java</artifactId>
+            <version>${openai.version}</version>
         </dependency>
 
         <dependency>

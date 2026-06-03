@@ -4,9 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.exception.BusinessException;
-import io.healthresetplan.modules.ai.LlmClient;
-import io.healthresetplan.modules.ai.LlmClientFactory;
-import io.healthresetplan.modules.ai.LlmProperties;
+import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import io.healthresetplan.modules.report.dto.AnalyzeResponse;
 import io.healthresetplan.modules.report.dto.ReportSaveRequest;
 import io.healthresetplan.modules.report.entity.HealthReport;
@@ -57,15 +55,11 @@ public class ReportService {
             """;
 
     private final HealthReportMapper reportMapper;
-    private final LlmClientFactory llmClientFactory;
-    private final LlmProperties llmProperties;
+    private final OneApiService oneApiService;
 
-    public ReportService(HealthReportMapper reportMapper,
-                         LlmClientFactory llmClientFactory,
-                         LlmProperties llmProperties) {
+    public ReportService(HealthReportMapper reportMapper, OneApiService oneApiService) {
         this.reportMapper = reportMapper;
-        this.llmClientFactory = llmClientFactory;
-        this.llmProperties = llmProperties;
+        this.oneApiService = oneApiService;
     }
 
     // ── 图像分析（不入库，返回明文结构化结果给客户端确认）────────────
@@ -87,10 +81,10 @@ public class ReportService {
         }
 
         String base64 = Base64.getEncoder().encodeToString(bytes);
-        LlmClient client = llmClientFactory.get(llmProperties.getVisionProvider());
-        String rawJson = client.analyzeImage(base64, mimeType, OCR_PROMPT);
+        // userId 传 null：OCR 属于一次性操作，不计入每日 AI 配额
+        String rawJson = oneApiService.analyzeImage(null, base64, mimeType, OCR_PROMPT);
 
-        return parseAnalyzeResult(rawJson, client.provider());
+        return parseAnalyzeResult(rawJson, "oneapi");
     }
 
     // ── 保存确认后的报告（客户端加密数据原样存储）────────────────────

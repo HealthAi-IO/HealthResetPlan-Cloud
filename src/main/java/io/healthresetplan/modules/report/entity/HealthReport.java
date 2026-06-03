@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.annotation.*;
 
 import java.time.LocalDateTime;
 
-/** 对应 health_report 表，所有内容字段均为客户端端到端加密。 */
+/** 对应 health_report 表，所有内容字段均为客户端客户端加密。 */
 @TableName("health_report")
 public class HealthReport {
 
