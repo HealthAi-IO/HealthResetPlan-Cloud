@@ -37,6 +37,13 @@ public class MembershipService {
     private static final Logger log = LoggerFactory.getLogger(MembershipService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<List<String>> LIST_TYPE = new TypeReference<>() {};
+    private static final Map<String, String> PROMO_CODES = Map.of(
+            "HEALTH30", "monthly",
+            "VIP30", "monthly",
+            "HEALTH365", "yearly",
+            "VIP365", "yearly",
+            "TRIAL7", "monthly"
+    );
 
     private final MembershipPlanMapper planMapper;
     private final UserSubscriptionMapper subscriptionMapper;
@@ -194,6 +201,17 @@ public class MembershipService {
     }
 
     // ── 定时过期检查（每小时）────────────────────────────────────
+
+    @Transactional
+    public MembershipStatusResponse redeemCode(String userId, String code) {
+        String normalized = code == null ? "" : code.trim().toUpperCase();
+        String planCode = PROMO_CODES.get(normalized);
+        if (planCode == null) {
+            throw new BusinessException(40002, "激活码无效或已使用");
+        }
+        activateSubscription(userId, planCode, "promo", "PROMO-" + normalized);
+        return getStatus(userId);
+    }
 
     @Scheduled(fixedRate = 3_600_000)
     @Transactional

@@ -152,16 +152,21 @@ public class AuthService {
 
         UserSession session = new UserSession();
         session.setUserId(userId);
-        session.setDeviceId(httpReq.getHeader("X-Device-Id"));
+        // 数据库中这些字段都是 NOT NULL，请求未提供时用空字符串兜底
+        session.setDeviceId(nullToEmpty(httpReq.getHeader("X-Device-Id")));
         session.setRefreshToken(refreshToken);
-        session.setIp(resolveClientIp(httpReq));
-        session.setUserAgent(httpReq.getHeader("User-Agent"));
+        session.setIp(nullToEmpty(resolveClientIp(httpReq)));
+        session.setUserAgent(nullToEmpty(httpReq.getHeader("User-Agent")));
         session.setExpiresAt(expiresAt);
         session.setCreatedAt(LocalDateTime.now());
         sessionMapper.insert(session);
 
         long accessExpiresIn = jwtProperties.getAccessTtlMinutes() * 60L;
         return new TokenResponse(accessToken, refreshToken, accessExpiresIn, userId);
+    }
+
+    private static String nullToEmpty(String s) {
+        return s == null ? "" : s;
     }
 
     private String resolveClientIp(HttpServletRequest req) {

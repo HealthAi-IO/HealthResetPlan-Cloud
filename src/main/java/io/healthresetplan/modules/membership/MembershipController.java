@@ -4,6 +4,7 @@ import io.healthresetplan.common.result.R;
 import io.healthresetplan.modules.membership.dto.CreateOrderRequest;
 import io.healthresetplan.modules.membership.dto.CreateOrderResponse;
 import io.healthresetplan.modules.membership.dto.MembershipStatusResponse;
+import io.healthresetplan.modules.membership.dto.RedeemCodeRequest;
 import io.healthresetplan.modules.membership.entity.MembershipPlan;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -42,6 +43,11 @@ public class MembershipController {
     @PostMapping("/orders")
     public R<CreateOrderResponse> createOrder(@Valid @RequestBody CreateOrderRequest req) {
         return R.ok(membershipService.createOrder(req, currentUserId()));
+    }
+
+    @PostMapping("/redeem")
+    public R<MembershipStatusResponse> redeem(@Valid @RequestBody RedeemCodeRequest req) {
+        return R.ok(membershipService.redeemCode(currentUserId(), req.getCode()));
     }
 
     /**
