@@ -209,7 +209,17 @@ public class MembershipService {
         if (planCode == null) {
             throw new BusinessException(40002, "激活码无效或已使用");
         }
-        activateSubscription(userId, planCode, "promo", "PROMO-" + normalized);
+
+        // 检查该激活码是否已被当前用户使用过
+        String orderNo = "PROMO-" + normalized;
+        Long used = subscriptionMapper.selectCount(new LambdaQueryWrapper<UserSubscription>()
+                .eq(UserSubscription::getUserId, userId)
+                .eq(UserSubscription::getPaymentOrderNo, orderNo));
+        if (used != null && used > 0) {
+            throw new BusinessException(40002, "该激活码已被您使用过，每个激活码仅限兑换一次");
+        }
+
+        activateSubscription(userId, planCode, "promo", orderNo);
         return getStatus(userId);
     }
 
@@ -244,7 +254,10 @@ public class MembershipService {
                                       String channel, String orderNo) {
         MembershipPlan plan = planMapper.selectOne(new LambdaQueryWrapper<MembershipPlan>()
                 .eq(MembershipPlan::getCode, planCode));
-        if (plan == null) return;
+        if (plan == null) {
+            log.error("套餐不存在 planCode={} userId={}", planCode, userId);
+            throw new BusinessException(40401, "套餐不存在或已下架，请联系客服");
+        }
 
         LocalDateTime now = LocalDateTime.now();
         // 续费时从当前有效期末尾顺延
