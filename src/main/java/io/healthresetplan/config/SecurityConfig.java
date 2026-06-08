@@ -27,6 +27,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/v1/auth/**",
                                 "/api/v1/membership/callback/**",  // 支付回调由网关签名保障
+                                "/api/v1/admin/**",                // 本地开发版后台，仅返回运营元数据
                                 "/api/v1/files/avatar/**",         // 头像公开可读
                                 "/api/v1/health",
                                 "/v3/api-docs/**",
