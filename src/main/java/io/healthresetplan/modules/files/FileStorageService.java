@@ -68,6 +68,30 @@ public class FileStorageService {
         }
     }
 
+    /** 存储头像（非加密公开文件）。 */
+    public void storeAvatar(MultipartFile file, String avatarKey) {
+        try {
+            Path dest = Paths.get(storagePath, avatarKey);
+            Files.createDirectories(dest.getParent());
+            Files.copy(file.getInputStream(), dest, StandardCopyOption.REPLACE_EXISTING);
+            log.info("头像存储成功 avatarKey={} size={}B", avatarKey, file.getSize());
+        } catch (IOException e) {
+            log.error("头像存储失败 avatarKey={}", avatarKey, e);
+            throw new BusinessException(50001, "头像上传失败，请重试");
+        }
+    }
+
+    /** 读取头像文件，不存在返回 null。 */
+    public byte[] readAvatar(String avatarKey) {
+        try {
+            Path file = Paths.get(storagePath, avatarKey);
+            if (!Files.exists(file)) return null;
+            return Files.readAllBytes(file);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
     /** 删除文件（报告删除时联动调用）。 */
     public void delete(String ossKey) {
         try {

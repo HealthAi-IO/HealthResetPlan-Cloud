@@ -61,10 +61,11 @@ public class AuthService {
             throw new BusinessException(40901, "该账号已注册");
         }
 
-        String userId = UUID.randomUUID().toString().replace("-", "");
+        String userId = generateUserId();
 
         UserAccount account = new UserAccount();
         account.setUserId(userId);
+        account.setCustomId(userId); // 默认展示编号 = user_id
         account.setNickname(req.getNickname() != null ? req.getNickname() : "健康用户");
         account.setStatus(1);
         account.setHasCloudSync(0);
@@ -167,6 +168,22 @@ public class AuthService {
 
     private static String nullToEmpty(String s) {
         return s == null ? "" : s;
+    }
+
+    /** 生成 12 位不重复纯数字用户 ID */
+    private String generateUserId() {
+        var random = new java.security.SecureRandom();
+        for (int i = 0; i < 10; i++) {
+            long num = 100_000_000_000L + (long)(random.nextDouble() * 899_999_999_999L);
+            String id = String.valueOf(num);
+            Long exists = accountMapper.selectCount(new LambdaQueryWrapper<UserAccount>()
+                    .eq(UserAccount::getUserId, id));
+            if (exists == null || exists == 0) {
+                return id;
+            }
+        }
+        // 极端兜底（理论上不会到这里）
+        return String.valueOf(100_000_000_000L + System.nanoTime() % 899_999_999_999L);
     }
 
     private String resolveClientIp(HttpServletRequest req) {

@@ -12,6 +12,8 @@ public class UserAccount {
     private Long id;
 
     private String userId;
+    /** 用户可自定义的展示编号 */
+    private String customId;
     private String nickname;
     private String avatarUrl;
 
@@ -37,6 +39,9 @@ public class UserAccount {
 
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }
+
+    public String getCustomId() { return customId; }
+    public void setCustomId(String customId) { this.customId = customId; }
 
     public String getNickname() { return nickname; }
     public void setNickname(String nickname) { this.nickname = nickname; }
