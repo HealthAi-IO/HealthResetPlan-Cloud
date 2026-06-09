@@ -181,12 +181,14 @@ public class AdminController {
                 ) o ON o.day = d.day
                 ORDER BY d.day ASC
                 """, start, start, start);
-        return rows.stream().map(row -> Map.of(
-                "day", String.valueOf(row.get("day")),
-                "users", number(row.get("users")),
-                "indicators", number(row.get("indicators")),
-                "orders", number(row.get("orders"))
-        )).toList();
+        return rows.stream().map(row -> {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("day", String.valueOf(row.get("day")));
+            out.put("users", number(row.get("users")));
+            out.put("indicators", number(row.get("indicators")));
+            out.put("orders", number(row.get("orders")));
+            return out;
+        }).toList();
     }
 
     private List<Map<String, Object>> indicatorTypes(String userId) {
@@ -237,7 +239,7 @@ public class AdminController {
         Map<String, Object> out = new LinkedHashMap<>(row);
         out.put("hasCloudSync", number(row.get("has_cloud_sync")) == 1);
         out.put("activeMember", number(row.get("active_subscription_count")) > 0);
-        out.put("statusText", switch (number(row.get("status"))) {
+        out.put("statusText", switch ((int) number(row.get("status"))) {
             case 1 -> "正常";
             case 0 -> "禁用";
             case -1 -> "注销";

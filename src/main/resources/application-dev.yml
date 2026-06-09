@@ -17,8 +17,9 @@ app:
     storage-path: ${FILES_STORAGE_PATH:/home/lyt/hrp-uploads}
   jwt:
     secret: ${JWT_SECRET:replace-me-in-real-env-please-replace-me-please}
-    access-ttl-minutes: 60
-    refresh-ttl-days: 30
+    # 开发环境：access 100 年、refresh 100 年，相当于不过期；生产环境请改回合理值
+    access-ttl-minutes: 52560000
+    refresh-ttl-days: 36500
   ai:
     # 对话/计划生成厂商优先级：依次尝试，失败自动降级
     chat-order: [qwen, doubao, deepseek]
@@ -27,7 +28,7 @@ app:
     # 单用户每日最大 AI 请求次数
     daily-limit: 30
     # 请求超时秒数
-    timeout-seconds: 90
+    timeout-seconds: 120
     providers:
       qwen:
         base-url: https://dashscope.aliyuncs.com/compatible-mode/v1

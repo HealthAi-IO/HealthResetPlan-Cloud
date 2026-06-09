@@ -207,18 +207,10 @@ public class MembershipService {
         String normalized = code == null ? "" : code.trim().toUpperCase();
         String planCode = PROMO_CODES.get(normalized);
         if (planCode == null) {
-            throw new BusinessException(40002, "激活码无效或已使用");
+            throw new BusinessException(40002, "激活码无效");
         }
 
-        // 检查该激活码是否已被当前用户使用过
         String orderNo = "PROMO-" + normalized;
-        Long used = subscriptionMapper.selectCount(new LambdaQueryWrapper<UserSubscription>()
-                .eq(UserSubscription::getUserId, userId)
-                .eq(UserSubscription::getPaymentOrderNo, orderNo));
-        if (used != null && used > 0) {
-            throw new BusinessException(40002, "该激活码已被您使用过，每个激活码仅限兑换一次");
-        }
-
         activateSubscription(userId, planCode, "promo", orderNo);
         return getStatus(userId);
     }
