@@ -12,7 +12,7 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
-    locations: classpath:db/migration,filesystem:./sql/migration
+    locations: classpath:db/migration
 
 app:
   jwt:
@@ -20,20 +20,24 @@ app:
     access-ttl-minutes: 60
     refresh-ttl-days: 30
   ai:
-    default-provider: ${AI_DEFAULT_PROVIDER:deepseek}
+    chat-order: [qwen, doubao, deepseek]
+    vision-provider: ${AI_CHAT_VISION_PROVIDER:qwen}
+    daily-limit: ${AI_CHAT_DAILY_LIMIT:30}
+    timeout-seconds: ${AI_CHAT_TIMEOUT_SECONDS:120}
     providers:
       deepseek:
-        base-url: https://api.deepseek.com
-        model: ${DEEPSEEK_MODEL:deepseek-chat}
-        api-key: ${DEEPSEEK_API_KEY}
+        base-url: ${AI_CHAT_DEEPSEEK_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
+        model: ${AI_CHAT_DEEPSEEK_MODEL:deepseek-v3-2-251201}
+        api-key: ${AI_CHAT_DEEPSEEK_API_KEY}
+        web-search-model: ${AI_CHAT_DEEPSEEK_WEB_SEARCH_MODEL:bot-20260413134946-267m7}
       doubao:
-        base-url: https://ark.cn-beijing.volces.com/api/v3
-        model: ${DOUBAO_MODEL:doubao-pro-32k}
-        api-key: ${DOUBAO_API_KEY}
+        base-url: ${AI_CHAT_DOUBAO_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
+        model: ${AI_CHAT_DOUBAO_MODEL:doubao-seed-1-8-251228}
+        api-key: ${AI_CHAT_DOUBAO_API_KEY}
       qwen:
-        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-        model: ${QWEN_MODEL:qwen-plus}
-        api-key: ${QWEN_API_KEY}
+        base-url: ${AI_CHAT_QWEN_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}
+        model: ${AI_CHAT_QWEN3_VL_PLUS_MODEL:qwen3-vl-plus}
+        api-key: ${AI_CHAT_QWEN_API_KEY}
 
 logging:
   level:

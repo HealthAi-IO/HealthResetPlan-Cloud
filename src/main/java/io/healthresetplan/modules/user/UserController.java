@@ -32,6 +32,7 @@ public class UserController {
         return R.ok(Map.of(
                 "userId", account.getUserId(),
                 "customId", account.getCustomId() != null ? account.getCustomId() : account.getUserId(),
+                "phoneTail", account.getPhoneTail() != null ? account.getPhoneTail() : "",
                 "nickname", account.getNickname(),
                 "avatarUrl", account.getAvatarUrl() != null ? account.getAvatarUrl() : "",
                 "hasCloudSync", account.getHasCloudSync() == 1
@@ -78,6 +79,7 @@ public class UserController {
         return R.ok(Map.of(
                 "userId", account != null ? account.getUserId() : userId,
                 "customId", account != null && account.getCustomId() != null && !account.getCustomId().isEmpty() ? account.getCustomId() : userId,
+                "phoneTail", account != null && account.getPhoneTail() != null ? account.getPhoneTail() : "",
                 "nickname", account != null ? account.getNickname() : "",
                 "avatarUrl", account != null && account.getAvatarUrl() != null ? account.getAvatarUrl() : "",
                 "hasCloudSync", account != null && account.getHasCloudSync() == 1

@@ -26,32 +26,34 @@ public class ReportService {
     private static final Logger log = LoggerFactory.getLogger(ReportService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Set<String> ALLOWED_TYPES = Set.of("image/jpeg", "image/png", "image/webp", "image/gif");
-    private static final long MAX_SIZE_BYTES = 10 * 1024 * 1024L; // 10MB
+    private static final long MAX_SIZE_BYTES = 10 * 1024 * 1024L;
 
     private static final String OCR_PROMPT = """
-            你是专业医学报告解析专家。请仔细阅读图片中的体检报告，提取所有健康指标数据。
-            严格按照以下 JSON 格式输出，不要包含任何代码块标记（```）或额外说明：
+            你是一位医疗检验数据解析专家。请阅读用户上传的体检、检验或检查报告图片，
+            尽可能完整地抽取结构化健康指标。
 
+            只输出严格 JSON，不要输出 Markdown、代码块或额外解释。JSON 格式：
             {
-              "reportDate": "YYYY-MM-DD（若无法识别则填 null）",
+              "reportDate": "YYYY-MM-DD 或 null",
               "indicators": [
                 {
-                  "category": "血糖|血脂|血压|肝功能|肾功能|血常规|甲状腺|尿常规|心电图|其他",
+                  "category": "血糖|血脂|血压|肝功能|肾功能|血常规|甲状腺|尿常规|心电图|影像|其他",
                   "name": "指标名称",
-                  "value": "检测值",
-                  "unit": "单位",
-                  "referenceRange": "参考范围原始文本",
+                  "value": "检测值或结论原文",
+                  "unit": "单位，没有则为空字符串",
+                  "referenceRange": "参考范围原文，没有则为空字符串",
                   "status": "normal|high|low|unknown"
                 }
               ],
-              "summary": "一句话总结本次体检重点（50字以内）",
-              "rawText": "图片中识别到的所有文字"
+              "summary": "一句话总结本次报告重点，80 字以内",
+              "rawText": "图片中识别到的主要文字"
             }
 
-            注意：
-            1. 只输出纯 JSON，不要加任何前缀或后缀
-            2. status 根据参考范围判断：normal=在正常范围，high=偏高，low=偏低，unknown=无参考范围或无法判断
-            3. 若识别不到报告日期则 reportDate 填 null
+            要求：
+            1. 逐行提取图片里所有医学指标、检查项目和影像结论，不只提取异常项。
+            2. 每个指标必须独立放入 indicators 数组，保留原始指标名、数值、单位和参考范围。
+            3. 若报告日期无法识别，reportDate 填 null。
+            4. status 根据参考范围判断；无法判断时填 unknown。
             """;
 
     private final HealthReportMapper reportMapper;
@@ -62,9 +64,11 @@ public class ReportService {
         this.oneApiService = oneApiService;
     }
 
-    // ── 图像分析（不入库，返回明文结构化结果给客户端确认）────────────
-
     public AnalyzeResponse analyze(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(40001, "图片不能为空");
+        }
+
         String mimeType = file.getContentType();
         if (mimeType == null || !ALLOWED_TYPES.contains(mimeType.toLowerCase())) {
             throw new BusinessException(40001, "仅支持 JPEG / PNG / WebP / GIF 格式图片");
@@ -81,13 +85,9 @@ public class ReportService {
         }
 
         String base64 = Base64.getEncoder().encodeToString(bytes);
-        // userId 传 null：OCR 属于一次性操作，不计入每日 AI 配额
         String rawJson = oneApiService.analyzeImage(null, base64, mimeType, OCR_PROMPT);
-
-        return parseAnalyzeResult(rawJson, "oneapi");
+        return parseAnalyzeResult(rawJson, oneApiService.visionProviderLabel());
     }
-
-    // ── 保存确认后的报告（客户端加密数据原样存储）────────────────────
 
     @Transactional
     public void save(ReportSaveRequest req, String userId) {
@@ -96,24 +96,22 @@ public class ReportService {
                 .eq(HealthReport::getClientId, req.getClientId()));
 
         if (existing != null) {
-            // 幂等更新
             fillFields(existing, req);
             existing.setUpdatedAt(LocalDateTime.now());
             existing.setServerUpdatedAt(LocalDateTime.now());
             reportMapper.updateById(existing);
-        } else {
-            HealthReport report = new HealthReport();
-            report.setUserId(userId);
-            report.setClientId(req.getClientId());
-            fillFields(report, req);
-            report.setCreatedAt(LocalDateTime.now());
-            report.setUpdatedAt(LocalDateTime.now());
-            report.setServerUpdatedAt(LocalDateTime.now());
-            reportMapper.insert(report);
+            return;
         }
-    }
 
-    // ── 列表（仅返回元数据，加密内容由客户端解密）────────────────────
+        HealthReport report = new HealthReport();
+        report.setUserId(userId);
+        report.setClientId(req.getClientId());
+        fillFields(report, req);
+        report.setCreatedAt(LocalDateTime.now());
+        report.setUpdatedAt(LocalDateTime.now());
+        report.setServerUpdatedAt(LocalDateTime.now());
+        reportMapper.insert(report);
+    }
 
     public List<HealthReport> list(String userId, int page, int size) {
         Page<HealthReport> pager = new Page<>(page, size);
@@ -122,8 +120,6 @@ public class ReportService {
                         .orderByDesc(HealthReport::getReportTime))
                 .getRecords();
     }
-
-    // ── 删除（软删）──────────────────────────────────────────────────
 
     @Transactional
     public void delete(String clientId, String userId) {
@@ -136,11 +132,8 @@ public class ReportService {
         reportMapper.deleteById(report.getId());
     }
 
-    // ── 内部 ──────────────────────────────────────────────────────────
-
     private AnalyzeResponse parseAnalyzeResult(String rawJson, String provider) {
-        // 尝试去掉 LLM 可能残留的 markdown 代码块标记
-        String json = rawJson.trim();
+        String json = rawJson == null ? "" : rawJson.trim();
         if (json.startsWith("```")) {
             int start = json.indexOf('\n');
             int end = json.lastIndexOf("```");
@@ -154,43 +147,54 @@ public class ReportService {
             response.setProvider(provider);
             return response;
         } catch (Exception e) {
-            log.warn("LLM 返回的 JSON 解析失败，降级为 rawText 模式: {}", e.getMessage());
+            log.warn("LLM OCR JSON parse failed, falling back to raw text: {}", e.getMessage());
             AnalyzeResponse fallback = new AnalyzeResponse();
             fallback.setRawText(rawJson);
+            fallback.setSummary("报告已识别，请人工核对原文");
             fallback.setProvider(provider);
             return fallback;
         }
     }
 
-    private void fillFields(HealthReport r, ReportSaveRequest req) {
-        if (req.getReportTime() != null) {
+    private void fillFields(HealthReport report, ReportSaveRequest req) {
+        if (req.getReportTime() != null && !req.getReportTime().isBlank()) {
             try {
-                r.setReportTime(LocalDateTime.parse(req.getReportTime()));
-            } catch (Exception ignored) {}
+                report.setReportTime(LocalDateTime.parse(req.getReportTime()));
+            } catch (Exception ignored) {
+                report.setReportTime(LocalDateTime.now());
+            }
+        } else if (report.getReportTime() == null) {
+            report.setReportTime(LocalDateTime.now());
         }
-        r.setDeviceId(nullToEmpty(req.getDeviceId()));
-        if (req.getClientUpdatedAt() != null) {
+
+        if (req.getClientUpdatedAt() != null && !req.getClientUpdatedAt().isBlank()) {
             try {
-                r.setClientUpdatedAt(LocalDateTime.parse(req.getClientUpdatedAt()));
-            } catch (Exception ignored) {}
+                report.setClientUpdatedAt(LocalDateTime.parse(req.getClientUpdatedAt()));
+            } catch (Exception ignored) {
+                report.setClientUpdatedAt(LocalDateTime.now());
+            }
+        } else {
+            report.setClientUpdatedAt(LocalDateTime.now());
         }
-        r.setImageOssKey(nullToEmpty(req.getImageOssKey()));
-        r.setImageWrappedDek(req.getImageWrappedDek());
-        r.setImageDekIv(req.getImageDekIv());
-        r.setImageDekTag(req.getImageDekTag());
-        r.setOcrTextCipher(req.getOcrTextCipher());
-        r.setOcrTextIv(req.getOcrTextIv());
-        r.setOcrTextTag(req.getOcrTextTag());
-        r.setStructuredCipher(req.getStructuredCipher());
-        r.setStructuredIv(req.getStructuredIv());
-        r.setStructuredTag(req.getStructuredTag());
-        r.setSummaryCipher(req.getSummaryCipher());
-        r.setSummaryIv(req.getSummaryIv());
-        r.setSummaryTag(req.getSummaryTag());
-        r.setAlg(req.getAlg() != null ? req.getAlg() : "aes-256-gcm:v1");
+
+        report.setDeviceId(nullToEmpty(req.getDeviceId()));
+        report.setImageOssKey(nullToEmpty(req.getImageOssKey()));
+        report.setImageWrappedDek(req.getImageWrappedDek());
+        report.setImageDekIv(req.getImageDekIv());
+        report.setImageDekTag(req.getImageDekTag());
+        report.setOcrTextCipher(req.getOcrTextCipher());
+        report.setOcrTextIv(req.getOcrTextIv());
+        report.setOcrTextTag(req.getOcrTextTag());
+        report.setStructuredCipher(req.getStructuredCipher());
+        report.setStructuredIv(req.getStructuredIv());
+        report.setStructuredTag(req.getStructuredTag());
+        report.setSummaryCipher(req.getSummaryCipher());
+        report.setSummaryIv(req.getSummaryIv());
+        report.setSummaryTag(req.getSummaryTag());
+        report.setAlg(req.getAlg() != null && !req.getAlg().isBlank() ? req.getAlg() : "aes-256-gcm:v1");
     }
 
-    private String nullToEmpty(String s) {
-        return s != null ? s : "";
+    private String nullToEmpty(String value) {
+        return value != null ? value : "";
     }
 }

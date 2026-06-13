@@ -21,17 +21,18 @@ import java.util.Map;
  *     timeout-seconds: 90
  *     providers:
  *       qwen:
- *         base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
- *         api-key: sk-xxx
- *         model: qwen-turbo
+ *         base-url: ${AI_CHAT_QWEN_API_BASE}
+ *         api-key: ${AI_CHAT_QWEN_API_KEY}
+ *         model: ${AI_CHAT_QWEN3_VL_PLUS_MODEL}
  *       doubao:
- *         base-url: https://ark.cn-beijing.volces.com/api/v3
- *         api-key: ark-xxx
- *         model: doubao-lite-32k
+ *         base-url: ${AI_CHAT_DOUBAO_API_BASE}
+ *         api-key: ${AI_CHAT_DOUBAO_API_KEY}
+ *         model: ${AI_CHAT_DOUBAO_MODEL}
  *       deepseek:
- *         base-url: https://api.deepseek.com
- *         api-key: sk-xxx
- *         model: deepseek-chat
+ *         base-url: ${AI_CHAT_DEEPSEEK_API_BASE}
+ *         api-key: ${AI_CHAT_DEEPSEEK_API_KEY}
+ *         model: ${AI_CHAT_DEEPSEEK_MODEL}
+ *         web-search-model: ${AI_CHAT_DEEPSEEK_WEB_SEARCH_MODEL}
  * </pre>
  */
 @Component
@@ -75,8 +76,9 @@ public class OneApiProperties {
         private String baseUrl;
         /** 该厂商的 API Key */
         private String apiKey;
-        /** 模型名，如 qwen-turbo / doubao-lite-32k / deepseek-chat */
+        /** AI model name. */
         private String model;
+        private String webSearchModel;
 
         public String getBaseUrl() { return baseUrl; }
         public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
@@ -86,6 +88,9 @@ public class OneApiProperties {
 
         public String getModel() { return model; }
         public void setModel(String model) { this.model = model; }
+
+        public String getWebSearchModel() { return webSearchModel; }
+        public void setWebSearchModel(String webSearchModel) { this.webSearchModel = webSearchModel; }
 
         public boolean isConfigured() {
             return baseUrl != null && !baseUrl.isBlank()

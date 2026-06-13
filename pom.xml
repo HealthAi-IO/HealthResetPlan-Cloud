@@ -16,7 +16,7 @@
     <artifactId>health-reset-plan-cloud</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <name>HealthResetPlan-Cloud</name>
-    <description>健康重启计划后端 API：用户、健康数据、AI 计划、加密同步</description>
+    <description>Health Reset Plan backend API for users, health data, AI plans, and encrypted sync.</description>
 
     <properties>
         <java.version>17</java.version>
@@ -100,7 +100,7 @@
             <artifactId>commons-lang3</artifactId>
         </dependency>
 
-        <!-- OpenAI 官方 Java SDK（兼容 OneAPI / 任意 OpenAI 协议代理） -->
+        <!-- OpenAI Java SDK, compatible with OneAPI and OpenAI-compatible proxies. -->
         <dependency>
             <groupId>com.openai</groupId>
             <artifactId>openai-java</artifactId>

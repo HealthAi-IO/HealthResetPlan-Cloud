@@ -1,66 +1,44 @@
 # HealthResetPlan-Cloud
 
-> 健康重启计划后端 API：Java 17 + Spring Boot 3 + MyBatis-Plus + MySQL 8 + Redis 7。
+健康重启计划后端 API：Java 17 + Spring Boot 3 + MyBatis-Plus + MySQL 8。
 
-## 工程结构
+## 本地启动
 
-```
-HealthResetPlan-Cloud/
- ├── pom.xml
- ├── sql/
- │    └── migration/            # Flyway DDL 脚本
- ├── src/main/java/io/healthresetplan/
- │    ├── HealthResetPlanApplication.java
- │    ├── common/                # 通用工具（R / 异常 / 健康检查）
- │    ├── config/                # Bean 配置（Security 等）
- │    └── modules/
- │         ├── ai/               # 大模型适配（DeepSeek / 豆包 / 通义千问）
- │         ├── sync/             # 端到端加密同步
- │         └── user/             # 用户
- ├── src/main/resources/
- │    ├── application.yml
- │    ├── application-dev.yml
- │    ├── application-prod.yml
- │    └── prompts/               # 提示词模板
- └── scripts/                    # 部署脚本（待补充）
+在项目根目录运行：
+
+```powershell
+.\start-backend.cmd
 ```
 
-## 关键设计
+或进入后端目录手动运行：
 
-- **端到端加密**：服务端不持有用户主密钥；所有 `cipher / iv / tag` 三元组字段服务端不解密。
-- **AI 适配**：抽象 `LlmClient` 接口，按厂商实现 OpenAI 兼容协议。
-- **Flyway 迁移**：DDL 集中在 `sql/migration/`，启动时自动执行。
-- **接口前缀**：`/api/v1`。
-
-## 本地开发
-
-```bash
-# 1. 准备 MySQL 与 Redis（默认 localhost）
-# 2. 创建库
-mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS health_reset_plan DEFAULT CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
-
-# 3. 编译 & 运行
-mvn -q -DskipTests compile
-mvn spring-boot:run
+```powershell
+..\tools\maven\apache-maven-3.9.9\bin\mvn.cmd "-Dmaven.repo.local=..\.m2repo" spring-boot:run
 ```
 
-环境变量（开发可省略）：
+健康检查：
+
+```text
+http://localhost:8080/api/v1/health
+```
+
+## 环境变量
 
 | 变量 | 说明 |
 | --- | --- |
 | `DB_USERNAME` / `DB_PASSWORD` | MySQL 凭据 |
 | `REDIS_HOST` / `REDIS_PORT` | Redis 主机 |
 | `JWT_SECRET` | JWT 签名密钥 |
-| `DEEPSEEK_API_KEY` / `DOUBAO_API_KEY` / `QWEN_API_KEY` | AI 厂商 Key |
+| `AI_CHAT_DEEPSEEK_API_KEY` / `AI_CHAT_DOUBAO_API_KEY` / `AI_CHAT_QWEN_API_KEY` | AI 厂商 Key |
+| `AI_CHAT_DEEPSEEK_API_BASE` / `AI_CHAT_DOUBAO_API_BASE` / `AI_CHAT_QWEN_API_BASE` | AI 厂商 OpenAI 兼容接口地址 |
+| `AI_CHAT_DEEPSEEK_MODEL` / `AI_CHAT_DOUBAO_MODEL` / `AI_CHAT_QWEN3_VL_PLUS_MODEL` | AI 模型名称 |
+| `AI_CHAT_DEEPSEEK_WEB_SEARCH_MODEL` | DeepSeek 联网搜索 Bot 应用 ID |
 
-Swagger UI：<http://localhost:8080/swagger-ui.html>。
+## 配置位置
 
-## 文档
+AI 配置位于：
 
-- 完整需求 / 架构 / 数据库 / 接口文档：[`/docs`](../docs)
-- 端到端加密方案：[`/docs/05-安全与加密`](../docs/05-安全与加密)
-- AI 集成：[`/docs/06-AI模型集成`](../docs/06-AI模型集成)
+- `src/main/resources/application-dev.yml`
+- `src/main/resources/application-prod.yml`
 
-## 许可证
-
-Apache License 2.0
+后端代码通过 `app.ai.providers.*` 读取这些配置。

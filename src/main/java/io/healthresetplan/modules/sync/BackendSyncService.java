@@ -1,35 +1,45 @@
 package io.healthresetplan.modules.sync;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.modules.sync.entity.HealthIndicator;
+import io.healthresetplan.modules.sync.entity.SyncRecord;
 import io.healthresetplan.modules.sync.mapper.HealthIndicatorMapper;
+import io.healthresetplan.modules.sync.mapper.SyncRecordMapper;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * 客户端加密同步服务。
- *
- * <p>push 实现"幂等 upsert + 客户端版本胜出"：
- * 若服务端已有该 client_id 且版本更高，则服务端不覆盖（客户端下次 pull 后会更新本地）。</p>
- *
- * <p>pull 实现增量拉取：按 server_updated_at > since 过滤，升序返回，客户端再次用该批
- * 最大的 serverTime 作为下次 since。</p>
- */
 @Service
 public class BackendSyncService {
 
-    private static final Set<String> ALLOWED_TABLES = Set.of("health_indicator");
+    private static final Set<String> ALLOWED_TABLES = Set.of(
+            "user_profile",
+            "health_indicator",
+            "plan",
+            "clock_record",
+            "reminder",
+            "health_report"
+    );
 
+    private final SyncRecordMapper syncRecordMapper;
     private final HealthIndicatorMapper healthIndicatorMapper;
+    private final ObjectMapper objectMapper;
 
-    public BackendSyncService(HealthIndicatorMapper healthIndicatorMapper) {
+    public BackendSyncService(
+            SyncRecordMapper syncRecordMapper,
+            HealthIndicatorMapper healthIndicatorMapper,
+            ObjectMapper objectMapper) {
+        this.syncRecordMapper = syncRecordMapper;
         this.healthIndicatorMapper = healthIndicatorMapper;
+        this.objectMapper = objectMapper;
     }
 
     public int push(String userId, String deviceId, List<SyncPushRequest.Item> items) {
@@ -37,68 +47,57 @@ public class BackendSyncService {
         int accepted = 0;
         for (var item : items) {
             if (!ALLOWED_TABLES.contains(item.table())) continue;
-            if ("health_indicator".equals(item.table())) {
-                pushHealthIndicator(userId, deviceId != null ? deviceId : "", item);
-                accepted++;
-            }
+            pushRecord(userId, deviceId != null ? deviceId : "", item);
+            accepted++;
         }
         return accepted;
     }
 
-    private void pushHealthIndicator(String userId, String deviceId, SyncPushRequest.Item item) {
-        var existing = healthIndicatorMapper.selectOne(
-                new LambdaQueryWrapper<HealthIndicator>()
-                        .eq(HealthIndicator::getUserId, userId)
-                        .eq(HealthIndicator::getClientId, item.clientId())
-        );
+    private void pushRecord(String userId, String deviceId, SyncPushRequest.Item item) {
+        var existing = syncRecordMapper.selectOneIncludingDeleted(userId, item.table(), item.clientId());
 
         var now = LocalDateTime.now();
-        var meta = item.meta() != null ? item.meta() : Map.of();
-        var type = String.valueOf(meta.getOrDefault("type", ""));
-        var source = String.valueOf(meta.getOrDefault("source", "manual"));
-        var measuredAt = meta.containsKey("measured_at")
-                ? fromEpochMilli(((Number) meta.get("measured_at")).longValue())
-                : now;
         var clientUpdatedAt = item.clientUpdatedAt() > 0
                 ? fromEpochMilli(item.clientUpdatedAt())
                 : now;
-        var algStr = item.alg() != null ? item.alg() : "aes-256-gcm:v1";
+        var version = Math.max(item.version(), 0L);
+        var deleted = Boolean.TRUE.equals(item.deleted());
 
         if (existing == null) {
-            var ind = new HealthIndicator();
-            ind.setUserId(userId);
-            ind.setClientId(item.clientId());
-            ind.setType(type);
-            ind.setPayloadCipher(item.cipher());
-            ind.setPayloadIv(item.iv());
-            ind.setPayloadTag(item.tag());
-            ind.setAlg(algStr);
-            ind.setSource(source);
-            ind.setMeasuredAt(measuredAt);
-            ind.setDeviceId(deviceId);
-            ind.setClientUpdatedAt(clientUpdatedAt);
-            ind.setServerUpdatedAt(now);
-            ind.setCreatedAt(now);
-            ind.setUpdatedAt(now);
-            ind.setVersion(0L);
-            healthIndicatorMapper.insert(ind);
-        } else {
-            long serverVersion = existing.getVersion() != null ? existing.getVersion() : 0L;
-            if (item.version() > serverVersion) {
-                existing.setPayloadCipher(item.cipher());
-                existing.setPayloadIv(item.iv());
-                existing.setPayloadTag(item.tag());
-                existing.setAlg(algStr);
-                existing.setType(type);
-                existing.setSource(source);
-                existing.setMeasuredAt(measuredAt);
-                existing.setDeviceId(deviceId);
-                existing.setClientUpdatedAt(clientUpdatedAt);
-                existing.setServerUpdatedAt(now);
-                existing.setVersion(item.version());
-                healthIndicatorMapper.updateById(existing);
-            }
-            // server version >= client version → skip；客户端下次 pull 时会同步到最新
+            var record = new SyncRecord();
+            record.setUserId(userId);
+            record.setTableName(item.table());
+            record.setClientId(item.clientId());
+            record.setPayloadCipher(item.cipher());
+            record.setPayloadIv(item.iv());
+            record.setPayloadTag(item.tag());
+            record.setAlg(item.alg() != null ? item.alg() : "aes-256-gcm:v1");
+            record.setMetaJson(writeMeta(item.meta()));
+            record.setDeviceId(deviceId);
+            record.setClientUpdatedAt(clientUpdatedAt);
+            record.setServerUpdatedAt(now);
+            record.setCreatedAt(now);
+            record.setUpdatedAt(now);
+            record.setDeletedAt(deleted ? now : null);
+            record.setVersion(version);
+            syncRecordMapper.insert(record);
+            return;
+        }
+
+        long serverVersion = existing.getVersion() != null ? existing.getVersion() : 0L;
+        if (version >= serverVersion) {
+            existing.setPayloadCipher(item.cipher());
+            existing.setPayloadIv(item.iv());
+            existing.setPayloadTag(item.tag());
+            existing.setAlg(item.alg() != null ? item.alg() : "aes-256-gcm:v1");
+            existing.setMetaJson(writeMeta(item.meta()));
+            existing.setDeviceId(deviceId);
+            existing.setClientUpdatedAt(clientUpdatedAt);
+            existing.setServerUpdatedAt(now);
+            existing.setUpdatedAt(now);
+            existing.setDeletedAt(deleted ? now : null);
+            existing.setVersion(version);
+            syncRecordMapper.updateById(existing);
         }
     }
 
@@ -107,29 +106,72 @@ public class BackendSyncService {
                 ? fromEpochMilli(sinceMs)
                 : LocalDateTime.of(2000, 1, 1, 0, 0);
 
-        return healthIndicatorMapper
-                .selectByUserSince(userId, since, Math.min(limit, 500))
+        var cappedLimit = Math.min(limit, 500);
+        var items = new ArrayList<SyncPullItem>();
+
+        syncRecordMapper
+                .selectByUserSince(userId, since, cappedLimit)
                 .stream()
-                .map(ind -> new SyncPullItem(
-                        "health_indicator",
-                        ind.getClientId(),
-                        ind.getVersion() != null ? ind.getVersion() : 0L,
-                        ind.getClientUpdatedAt() != null
-                                ? toEpochMilli(ind.getClientUpdatedAt())
+                .map(record -> new SyncPullItem(
+                        record.getTableName(),
+                        record.getClientId(),
+                        record.getVersion() != null ? record.getVersion() : 0L,
+                        record.getClientUpdatedAt() != null
+                                ? toEpochMilli(record.getClientUpdatedAt())
                                 : 0L,
-                        ind.getPayloadCipher(),
-                        ind.getPayloadIv(),
-                        ind.getPayloadTag(),
-                        ind.getAlg() != null ? ind.getAlg() : "aes-256-gcm:v1",
-                        Map.of(
-                                "type", ind.getType() != null ? ind.getType() : "",
-                                "measured_at", ind.getMeasuredAt() != null
-                                        ? toEpochMilli(ind.getMeasuredAt())
-                                        : 0L,
-                                "source", ind.getSource() != null ? ind.getSource() : "manual"
-                        )
+                        record.getPayloadCipher(),
+                        record.getPayloadIv(),
+                        record.getPayloadTag(),
+                        record.getAlg() != null ? record.getAlg() : "aes-256-gcm:v1",
+                        record.getDeletedAt() != null,
+                        readMeta(record.getMetaJson())
                 ))
+                .forEach(items::add);
+
+        // Compatibility for data written before the generic sync_record table:
+        // old health_indicator rows encrypted only payload_json. New clients
+        // detect that format and rebuild a local health_indicator row.
+        healthIndicatorMapper
+                .selectByUserSince(userId, since, cappedLimit)
+                .stream()
+                .map(record -> new SyncPullItem(
+                        "health_indicator",
+                        record.getClientId(),
+                        record.getVersion() != null ? record.getVersion() : 0L,
+                        record.getClientUpdatedAt() != null
+                                ? toEpochMilli(record.getClientUpdatedAt())
+                                : 0L,
+                        record.getPayloadCipher(),
+                        record.getPayloadIv(),
+                        record.getPayloadTag(),
+                        record.getAlg() != null ? record.getAlg() : "aes-256-gcm:v1",
+                        false,
+                        healthIndicatorMeta(record)
+                ))
+                .forEach(items::add);
+
+        return items.stream()
+                .sorted(Comparator.comparingLong(SyncPullItem::clientUpdatedAt))
+                .limit(cappedLimit)
                 .toList();
+    }
+
+    private String writeMeta(Map<String, Object> meta) {
+        try {
+            return objectMapper.writeValueAsString(meta != null ? meta : Map.of());
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readMeta(String metaJson) {
+        if (metaJson == null || metaJson.isBlank()) return Map.of();
+        try {
+            return objectMapper.readValue(metaJson, Map.class);
+        } catch (JsonProcessingException e) {
+            return Map.of();
+        }
     }
 
     private static LocalDateTime fromEpochMilli(long ms) {
@@ -138,5 +180,15 @@ public class BackendSyncService {
 
     private static long toEpochMilli(LocalDateTime ldt) {
         return ldt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+    }
+
+    private static Map<String, Object> healthIndicatorMeta(HealthIndicator record) {
+        return Map.of(
+                "type", record.getType() != null ? record.getType() : "weight",
+                "source", record.getSource() != null ? record.getSource() : "cloud",
+                "measured_at", record.getMeasuredAt() != null
+                        ? toEpochMilli(record.getMeasuredAt())
+                        : 0L
+        );
     }
 }

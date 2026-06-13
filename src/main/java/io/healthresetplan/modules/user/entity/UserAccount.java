@@ -14,11 +14,15 @@ public class UserAccount {
     private String userId;
     /** 用户可自定义的展示编号 */
     private String customId;
+    private String phoneTail;
     private String nickname;
     private String avatarUrl;
 
     /** 1=正常 0=禁用 -1=注销 */
     private Integer status;
+
+    /** user=普通用户 admin=后台管理员 */
+    private String roleCode;
 
     private Integer hasCloudSync;
 
@@ -43,6 +47,9 @@ public class UserAccount {
     public String getCustomId() { return customId; }
     public void setCustomId(String customId) { this.customId = customId; }
 
+    public String getPhoneTail() { return phoneTail; }
+    public void setPhoneTail(String phoneTail) { this.phoneTail = phoneTail; }
+
     public String getNickname() { return nickname; }
     public void setNickname(String nickname) { this.nickname = nickname; }
 
@@ -51,6 +58,9 @@ public class UserAccount {
 
     public Integer getStatus() { return status; }
     public void setStatus(Integer status) { this.status = status; }
+
+    public String getRoleCode() { return roleCode; }
+    public void setRoleCode(String roleCode) { this.roleCode = roleCode; }
 
     public Integer getHasCloudSync() { return hasCloudSync; }
     public void setHasCloudSync(Integer hasCloudSync) { this.hasCloudSync = hasCloudSync; }

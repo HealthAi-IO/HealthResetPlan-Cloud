@@ -30,14 +30,16 @@ public class AdminController {
     @GetMapping("/dashboard")
     public R<Map<String, Object>> dashboard() {
         LocalDateTime today = LocalDate.now().atStartOfDay();
+        long healthIndicators = combinedSyncedCount("health_indicator");
+        long reports = combinedSyncedCount("health_report");
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("stats", Map.of(
                 "totalUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL"),
                 "todayNewUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL AND created_at >= ?", today),
                 "activeMembers", count("SELECT COUNT(DISTINCT user_id) FROM user_subscription WHERE status = 'active' AND expires_at > NOW(3)"),
                 "cloudSyncUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL AND has_cloud_sync = 1"),
-                "healthIndicators", count("SELECT COUNT(*) FROM health_indicator WHERE deleted_at IS NULL"),
-                "reports", count("SELECT COUNT(*) FROM health_report WHERE deleted_at IS NULL"),
+                "healthIndicators", healthIndicators,
+                "reports", reports,
                 "paidOrders", count("SELECT COUNT(*) FROM payment_order WHERE status = 'paid'"),
                 "revenueYuan", moneyYuan(sumFen("SELECT COALESCE(SUM(amount_fen), 0) FROM payment_order WHERE status = 'paid'"))
         ));
@@ -62,9 +64,9 @@ public class AdminController {
         Object[] countArgs = new Object[]{};
         Object[] listArgs;
         if (like != null) {
-            where += " AND (ua.user_id LIKE ? OR ua.nickname LIKE ? OR ua.custom_id LIKE ?) ";
-            countArgs = new Object[]{like, like, like};
-            listArgs = new Object[]{like, like, like, safeSize, offset};
+            where += " AND (ua.nickname LIKE ? OR ua.phone_tail LIKE ?) ";
+            countArgs = new Object[]{like, like};
+            listArgs = new Object[]{like, like, safeSize, offset};
         } else {
             listArgs = new Object[]{safeSize, offset};
         }
@@ -74,15 +76,19 @@ public class AdminController {
                 SELECT
                   ua.user_id,
                   ua.custom_id,
+                  ua.phone_tail,
                   ua.nickname,
                   ua.avatar_url,
                   ua.status,
+                  ua.role_code,
                   ua.has_cloud_sync,
                   ua.created_at,
                   ua.updated_at,
                   (SELECT MAX(us.created_at) FROM user_session us WHERE us.user_id = ua.user_id) AS last_login_at,
-                  (SELECT COUNT(*) FROM health_indicator hi WHERE hi.user_id = ua.user_id AND hi.deleted_at IS NULL) AS indicator_count,
-                  (SELECT COUNT(*) FROM health_report hr WHERE hr.user_id = ua.user_id AND hr.deleted_at IS NULL) AS report_count,
+                  ((SELECT COUNT(*) FROM health_indicator hi WHERE hi.user_id = ua.user_id AND hi.deleted_at IS NULL)
+                   + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_indicator' AND sr.deleted_at IS NULL)) AS indicator_count,
+                  ((SELECT COUNT(*) FROM health_report hr WHERE hr.user_id = ua.user_id AND hr.deleted_at IS NULL)
+                   + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_report' AND sr.deleted_at IS NULL)) AS report_count,
                   (SELECT COUNT(*) FROM user_subscription sub WHERE sub.user_id = ua.user_id AND sub.status = 'active' AND sub.expires_at > NOW(3)) AS active_subscription_count,
                   (SELECT MAX(sub.expires_at) FROM user_subscription sub WHERE sub.user_id = ua.user_id AND sub.status = 'active') AS member_expires_at
                 FROM user_account ua
@@ -108,15 +114,19 @@ public class AdminController {
                 SELECT
                   ua.user_id,
                   ua.custom_id,
+                  ua.phone_tail,
                   ua.nickname,
                   ua.avatar_url,
                   ua.status,
+                  ua.role_code,
                   ua.has_cloud_sync,
                   ua.created_at,
                   ua.updated_at,
                   (SELECT MAX(us.created_at) FROM user_session us WHERE us.user_id = ua.user_id) AS last_login_at,
-                  (SELECT COUNT(*) FROM health_indicator hi WHERE hi.user_id = ua.user_id AND hi.deleted_at IS NULL) AS indicator_count,
-                  (SELECT COUNT(*) FROM health_report hr WHERE hr.user_id = ua.user_id AND hr.deleted_at IS NULL) AS report_count,
+                  ((SELECT COUNT(*) FROM health_indicator hi WHERE hi.user_id = ua.user_id AND hi.deleted_at IS NULL)
+                   + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_indicator' AND sr.deleted_at IS NULL)) AS indicator_count,
+                  ((SELECT COUNT(*) FROM health_report hr WHERE hr.user_id = ua.user_id AND hr.deleted_at IS NULL)
+                   + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_report' AND sr.deleted_at IS NULL)) AS report_count,
                   (SELECT COUNT(*) FROM user_subscription sub WHERE sub.user_id = ua.user_id AND sub.status = 'active' AND sub.expires_at > NOW(3)) AS active_subscription_count,
                   (SELECT MAX(sub.expires_at) FROM user_subscription sub WHERE sub.user_id = ua.user_id AND sub.status = 'active') AS member_expires_at
                 FROM user_account ua
@@ -168,10 +178,21 @@ public class AdminController {
                   GROUP BY DATE(created_at)
                 ) u ON u.day = d.day
                 LEFT JOIN (
-                  SELECT DATE(created_at) AS day, COUNT(*) AS indicators
-                  FROM health_indicator
-                  WHERE deleted_at IS NULL AND created_at >= ?
-                  GROUP BY DATE(created_at)
+                  SELECT day, SUM(indicators) AS indicators
+                  FROM (
+                    SELECT DATE(created_at) AS day, COUNT(*) AS indicators
+                    FROM health_indicator
+                    WHERE deleted_at IS NULL AND created_at >= ?
+                    GROUP BY DATE(created_at)
+                    UNION ALL
+                    SELECT DATE(created_at) AS day, COUNT(*) AS indicators
+                    FROM sync_record
+                    WHERE table_name = 'health_indicator'
+                      AND deleted_at IS NULL
+                      AND created_at >= ?
+                    GROUP BY DATE(created_at)
+                  ) h_all
+                  GROUP BY day
                 ) h ON h.day = d.day
                 LEFT JOIN (
                   SELECT DATE(created_at) AS day, COUNT(*) AS orders
@@ -180,7 +201,7 @@ public class AdminController {
                   GROUP BY DATE(created_at)
                 ) o ON o.day = d.day
                 ORDER BY d.day ASC
-                """, start, start, start);
+                """, start, start, start, start);
         return rows.stream().map(row -> {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("day", String.valueOf(row.get("day")));
@@ -194,27 +215,62 @@ public class AdminController {
     private List<Map<String, Object>> indicatorTypes(String userId) {
         if (userId == null || userId.isBlank()) {
             return jdbc.queryForList("""
-                    SELECT type, COUNT(*) AS count
-                    FROM health_indicator
-                    WHERE deleted_at IS NULL
+                    SELECT type, SUM(count) AS count
+                    FROM (
+                      SELECT type, COUNT(*) AS count
+                      FROM health_indicator
+                      WHERE deleted_at IS NULL
+                      GROUP BY type
+                      UNION ALL
+                      SELECT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(meta_json, '$.type')), ''), 'unknown') AS type,
+                             COUNT(*) AS count
+                      FROM sync_record
+                      WHERE table_name = 'health_indicator'
+                        AND deleted_at IS NULL
+                      GROUP BY type
+                    ) t
                     GROUP BY type
                     ORDER BY count DESC
                     LIMIT 12
                     """);
         }
         return jdbc.queryForList("""
-                SELECT type, COUNT(*) AS count
-                FROM health_indicator
-                WHERE deleted_at IS NULL AND user_id = ?
+                SELECT type, SUM(count) AS count
+                FROM (
+                  SELECT type, COUNT(*) AS count
+                  FROM health_indicator
+                  WHERE deleted_at IS NULL AND user_id = ?
+                  GROUP BY type
+                  UNION ALL
+                  SELECT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(meta_json, '$.type')), ''), 'unknown') AS type,
+                         COUNT(*) AS count
+                  FROM sync_record
+                  WHERE table_name = 'health_indicator'
+                    AND deleted_at IS NULL
+                    AND user_id = ?
+                  GROUP BY type
+                ) t
                 GROUP BY type
                 ORDER BY count DESC
                 LIMIT 12
-                """, userId);
+                """, userId, userId);
+    }
+
+    private long combinedSyncedCount(String tableName) {
+        if (!"health_indicator".equals(tableName) && !"health_report".equals(tableName)) {
+            return 0;
+        }
+        long legacy = count("SELECT COUNT(*) FROM " + tableName + " WHERE deleted_at IS NULL");
+        long generic = count(
+                "SELECT COUNT(*) FROM sync_record WHERE table_name = ? AND deleted_at IS NULL",
+                tableName
+        );
+        return legacy + generic;
     }
 
     private List<Map<String, Object>> recentUsers(int limit) {
         return jdbc.queryForList("""
-                SELECT user_id, custom_id, nickname, status, has_cloud_sync, created_at
+                SELECT user_id, custom_id, phone_tail, nickname, status, role_code, has_cloud_sync, created_at
                 FROM user_account
                 WHERE deleted_at IS NULL
                 ORDER BY created_at DESC
@@ -237,6 +293,10 @@ public class AdminController {
 
     private Map<String, Object> userRow(Map<String, Object> row) {
         Map<String, Object> out = new LinkedHashMap<>(row);
+        String maskedTail = maskPhoneTail(stringValue(row.get("phone_tail")));
+        // 仅向后台返回脱敏后的尾号，覆盖原字段避免明文遗漏
+        out.put("phone_tail", maskedTail);
+        out.put("account", accountDisplay(maskedTail, stringValue(row.get("nickname"))));
         out.put("hasCloudSync", number(row.get("has_cloud_sync")) == 1);
         out.put("activeMember", number(row.get("active_subscription_count")) > 0);
         out.put("statusText", switch ((int) number(row.get("status"))) {
@@ -246,6 +306,25 @@ public class AdminController {
             default -> "未知";
         });
         return out;
+    }
+
+    /**
+     * 防御式脱敏：只保留最后 4 位数字，前面补 ****。
+     * 即使上游数据异常含有完整手机号，也只会向后台暴露后 4 位。
+     */
+    private String maskPhoneTail(String phoneTail) {
+        if (phoneTail == null) return "";
+        String digits = phoneTail.replaceAll("\\D", "");
+        if (digits.isEmpty()) return "";
+        String tail = digits.length() >= 4 ? digits.substring(digits.length() - 4) : digits;
+        return "****" + tail;
+    }
+
+    private String accountDisplay(String maskedTail, String nickname) {
+        if (!maskedTail.isBlank()) {
+            return maskedTail;
+        }
+        return nickname != null && !nickname.isBlank() ? nickname : "-";
     }
 
     private long count(String sql, Object... args) {
@@ -266,6 +345,10 @@ public class AdminController {
         if (value instanceof Number n) return n.longValue();
         if (value == null) return 0L;
         return Long.parseLong(String.valueOf(value));
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private String moneyYuan(long amountFen) {

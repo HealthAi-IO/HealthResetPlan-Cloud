@@ -53,7 +53,7 @@ public class AiChatController {
     public SseEmitter chatStream(@RequestBody AiChatRequest req) {
         String userId = currentUserId();
         // 90 秒超时，与 OneAPI 请求超时对齐
-        SseEmitter emitter = new SseEmitter(90_000L);
+        SseEmitter emitter = new SseEmitter(180_000L);
 
         // 将阻塞的 LLM 调用放入异步线程，避免占用 Tomcat 线程
         taskExecutor.execute(() -> {

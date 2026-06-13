@@ -2,45 +2,33 @@ package io.healthresetplan.modules.report.dto;
 
 import jakarta.validation.constraints.NotBlank;
 
-/**
- * 保存已确认的体检报告请求体。
- * 所有内容字段均由客户端在本地加密后传入，服务端原样存储。
- */
 public class ReportSaveRequest {
 
     @NotBlank(message = "clientId 不能为空")
     private String clientId;
 
-    /** ISO-8601 格式报告日期，如 2024-01-15T00:00:00，可为 null */
     private String reportTime;
-
     private String deviceId;
     private String clientUpdatedAt;
 
-    // ── 图像（可选，客户端上传加密图像到 OSS 后填入）──────────────
     private String imageOssKey;
     private String imageWrappedDek;
     private String imageDekIv;
     private String imageDekTag;
 
-    // ── OCR 原始文本（客户端加密）────────────────────────────────
     private String ocrTextCipher;
     private String ocrTextIv;
     private String ocrTextTag;
 
-    // ── 结构化指标 JSON（客户端加密）─────────────────────────────
     private String structuredCipher;
     private String structuredIv;
     private String structuredTag;
 
-    // ── 摘要（客户端加密）────────────────────────────────────────
     private String summaryCipher;
     private String summaryIv;
     private String summaryTag;
 
     private String alg = "aes-256-gcm:v1";
-
-    // ── getters / setters ──────────────────────────────────
 
     public String getClientId() { return clientId; }
     public void setClientId(String clientId) { this.clientId = clientId; }

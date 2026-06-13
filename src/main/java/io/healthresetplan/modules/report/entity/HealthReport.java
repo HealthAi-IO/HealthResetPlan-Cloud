@@ -1,10 +1,15 @@
 package io.healthresetplan.modules.report.entity;
 
-import com.baomidou.mybatisplus.annotation.*;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
+import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 
 import java.time.LocalDateTime;
 
-/** 对应 health_report 表，所有内容字段均为客户端客户端加密。 */
 @TableName("health_report")
 public class HealthReport {
 
@@ -13,35 +18,24 @@ public class HealthReport {
 
     private String userId;
     private String clientId;
-
-    /** 客户端加密图像的 OSS Key */
     private String imageOssKey;
-    /** 图像 DEK（UMK 包裹） */
     private String imageWrappedDek;
     private String imageDekIv;
     private String imageDekTag;
-
-    /** OCR 原始文本（客户端加密） */
     private String ocrTextCipher;
     private String ocrTextIv;
     private String ocrTextTag;
-
-    /** 结构化指标 JSON（客户端加密） */
     private String structuredCipher;
     private String structuredIv;
     private String structuredTag;
-
-    /** 摘要（客户端加密） */
     private String summaryCipher;
     private String summaryIv;
     private String summaryTag;
-
     private String alg;
     private LocalDateTime reportTime;
     private String deviceId;
     private LocalDateTime clientUpdatedAt;
     private LocalDateTime serverUpdatedAt;
-
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -51,8 +45,6 @@ public class HealthReport {
 
     @Version
     private Long version;
-
-    // ── getters / setters ──────────────────────────────────
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }

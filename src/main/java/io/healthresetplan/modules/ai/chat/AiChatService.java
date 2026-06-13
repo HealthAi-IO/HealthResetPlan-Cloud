@@ -40,8 +40,13 @@ public class AiChatService {
     public AiChatResponse chat(String userId, AiChatRequest req) {
         checkMembership(userId);
         List<ChatCompletionMessageParam> msgs = buildMessages(req);
-        String content = oneApiService.complete(userId, msgs);
-        return new AiChatResponse("oneapi", content, 0, 0);
+        String content = oneApiService.complete(userId, msgs, req.provider());
+        return new AiChatResponse(
+                req.provider() == null || req.provider().isBlank() ? "oneapi" : req.provider(),
+                content,
+                0,
+                0
+        );
     }
 
     // ── 流式 ────────────────────────────────────────────────────
@@ -52,7 +57,7 @@ public class AiChatService {
                            Runnable onDone) {
         checkMembership(userId);
         List<ChatCompletionMessageParam> msgs = buildMessages(req);
-        oneApiService.stream(userId, msgs, tokenConsumer, onDone);
+        oneApiService.stream(userId, msgs, req.provider(), tokenConsumer, onDone);
     }
 
     // ── 配额查询 ─────────────────────────────────────────────────

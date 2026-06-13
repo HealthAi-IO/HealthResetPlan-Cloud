@@ -2,26 +2,21 @@ package io.healthresetplan.modules.report.dto;
 
 import java.util.List;
 
-/** 视觉大模型解析体检报告的结果（明文，由客户端加密后再保存）。 */
 public class AnalyzeResponse {
 
     private String reportDate;
     private List<Indicator> indicators;
     private String summary;
     private String rawText;
-    /** 本次分析使用的 AI provider */
     private String provider;
-    /** 本次分析使用的模型 */
     private String model;
 
     public static class Indicator {
-        /** 血糖 / 血脂 / 血压 / 肝功能 / 肾功能 / 血常规 / 甲状腺 / 尿常规 / 其他 */
         private String category;
         private String name;
         private String value;
         private String unit;
         private String referenceRange;
-        /** normal / high / low / unknown */
         private String status;
 
         public String getCategory() { return category; }

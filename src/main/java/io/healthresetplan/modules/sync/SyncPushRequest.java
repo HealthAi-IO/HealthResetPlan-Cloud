@@ -19,6 +19,7 @@ public record SyncPushRequest(
             @NotBlank String iv,
             @NotBlank String tag,
             String alg,
+            Boolean deleted,
             Map<String, Object> meta
     ) {
     }

@@ -2,6 +2,9 @@ package io.healthresetplan.modules.auth;
 
 import io.healthresetplan.common.result.R;
 import io.healthresetplan.modules.auth.dto.LoginRequest;
+import io.healthresetplan.modules.auth.dto.PasswordResetCodeRequest;
+import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
+import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
 import io.healthresetplan.modules.auth.dto.RefreshRequest;
 import io.healthresetplan.modules.auth.dto.RegisterRequest;
 import io.healthresetplan.modules.auth.dto.TokenResponse;
@@ -40,6 +43,17 @@ public class AuthController {
     @PostMapping("/logout")
     public R<Void> logout(@Valid @RequestBody RefreshRequest req) {
         authService.logout(req.getRefreshToken());
+        return R.ok();
+    }
+
+    @PostMapping("/password-reset/send-code")
+    public R<PasswordResetCodeResponse> sendPasswordResetCode(@Valid @RequestBody PasswordResetCodeRequest req) {
+        return R.ok(authService.sendPasswordResetCode(req));
+    }
+
+    @PostMapping("/password-reset/reset")
+    public R<Void> resetPassword(@Valid @RequestBody PasswordResetRequest req) {
+        authService.resetPassword(req);
         return R.ok();
     }
 }

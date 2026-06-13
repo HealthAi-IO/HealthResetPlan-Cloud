@@ -5,18 +5,17 @@ import io.healthresetplan.common.result.R;
 import io.healthresetplan.modules.membership.MembershipService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 客户端加密同步入口。
- *
- * <p>服务端不持有用户主密钥，对 cipher / iv / tag 不做解密，仅做"管道"。</p>
- * <p>push / pull 均需有效的云同步会员权益。</p>
- */
 @RestController
 @RequestMapping("/api/v1/sync")
 public class SyncController {
@@ -47,12 +46,10 @@ public class SyncController {
         List<SyncPullItem> items = syncService.pull(userId, sinceMs != null ? sinceMs : 0L, limit);
         return R.ok(Map.of(
                 "items", items,
-                "nextCursor", null,
                 "serverTime", Instant.now().toEpochMilli()
         ));
     }
 
-    /** 校验云同步权益并返回当前用户 ID。 */
     private String requireCloudSync() {
         String userId = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         if (!membershipService.hasCloudSync(userId)) {
