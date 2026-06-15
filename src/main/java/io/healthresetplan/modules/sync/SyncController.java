@@ -6,6 +6,7 @@ import io.healthresetplan.modules.membership.MembershipService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,7 +32,7 @@ public class SyncController {
     @PostMapping("/push")
     public R<Map<String, Object>> push(@Valid @RequestBody SyncPushRequest request) {
         String userId = requireCloudSync();
-        int accepted = syncService.push(userId, request.deviceId(), request.items());
+        int accepted = syncService.push(userId, request.deviceId(), request.keyFingerprint(), request.items());
         return R.ok(Map.of(
                 "accepted", accepted,
                 "serverTime", Instant.now().toEpochMilli()
@@ -40,10 +41,11 @@ public class SyncController {
 
     @GetMapping("/pull")
     public R<Map<String, Object>> pull(
+            @RequestHeader(value = "X-Key-Fingerprint", required = false) String keyFingerprint,
             @RequestParam(value = "since", required = false) Long sinceMs,
             @RequestParam(value = "limit", defaultValue = "200") int limit) {
         String userId = requireCloudSync();
-        List<SyncPullItem> items = syncService.pull(userId, sinceMs != null ? sinceMs : 0L, limit);
+        List<SyncPullItem> items = syncService.pull(userId, keyFingerprint, sinceMs != null ? sinceMs : 0L, limit);
         return R.ok(Map.of(
                 "items", items,
                 "serverTime", Instant.now().toEpochMilli()

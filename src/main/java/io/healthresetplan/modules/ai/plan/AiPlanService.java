@@ -68,11 +68,14 @@ public class AiPlanService {
                 OneApiService.userMsg(buildUserMessage(req))
         );
 
-        String rawJson = oneApiService.complete(userId, messages);
+        String preferredProvider = req.provider() != null && !req.provider().isBlank()
+                ? req.provider()
+                : null;
+        String rawJson = oneApiService.complete(userId, messages, preferredProvider);
         rawJson = cleanJson(rawJson);
 
         log.info("AI 计划生成成功 userId={}", userId);
-        return new AiPlanResponse("oneapi", rawJson, 0, 0);
+        return new AiPlanResponse(preferredProvider != null ? preferredProvider : "auto", rawJson, 0, 0);
     }
 
     // ── 内部 ─────────────────────────────────────────────────────

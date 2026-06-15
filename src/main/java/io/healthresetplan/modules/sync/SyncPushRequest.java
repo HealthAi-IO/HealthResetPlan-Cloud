@@ -8,6 +8,7 @@ import java.util.Map;
 
 public record SyncPushRequest(
         @NotBlank String deviceId,
+        String keyFingerprint,
         @NotNull List<Item> items
 ) {
     public record Item(

@@ -2,6 +2,7 @@ package io.healthresetplan.modules.sync;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.modules.sync.entity.HealthIndicator;
 import io.healthresetplan.modules.sync.entity.SyncRecord;
 import io.healthresetplan.modules.sync.mapper.HealthIndicatorMapper;
@@ -31,29 +32,53 @@ public class BackendSyncService {
 
     private final SyncRecordMapper syncRecordMapper;
     private final HealthIndicatorMapper healthIndicatorMapper;
+    private final KeyRetentionService keyRetentionService;
     private final ObjectMapper objectMapper;
 
     public BackendSyncService(
             SyncRecordMapper syncRecordMapper,
             HealthIndicatorMapper healthIndicatorMapper,
+            KeyRetentionService keyRetentionService,
             ObjectMapper objectMapper) {
         this.syncRecordMapper = syncRecordMapper;
         this.healthIndicatorMapper = healthIndicatorMapper;
+        this.keyRetentionService = keyRetentionService;
         this.objectMapper = objectMapper;
     }
 
-    public int push(String userId, String deviceId, List<SyncPushRequest.Item> items) {
+    public int push(String userId, String deviceId, String keyFingerprint, List<SyncPushRequest.Item> items) {
         if (items == null || items.isEmpty()) return 0;
+        keyRetentionService.markUsed(userId, normalizeFingerprint(keyFingerprint));
         int accepted = 0;
         for (var item : items) {
-            if (!ALLOWED_TABLES.contains(item.table())) continue;
-            pushRecord(userId, deviceId != null ? deviceId : "", item);
+            validateItem(item);
+            pushRecord(userId, deviceId != null ? deviceId : "", normalizeFingerprint(keyFingerprint), item);
             accepted++;
         }
         return accepted;
     }
 
-    private void pushRecord(String userId, String deviceId, SyncPushRequest.Item item) {
+    private void validateItem(SyncPushRequest.Item item) {
+        if (item == null) {
+            throw new BusinessException(40002, "同步数据为空");
+        }
+        if (!ALLOWED_TABLES.contains(item.table())) {
+            throw new BusinessException(40002, "不支持同步的数据类型：" + item.table());
+        }
+        if (item.clientId() == null || item.clientId().isBlank()) {
+            throw new BusinessException(40002, "同步数据缺少客户端 ID");
+        }
+        if (Boolean.TRUE.equals(item.deleted())) {
+            return;
+        }
+        if (item.cipher() == null || item.cipher().isBlank()
+                || item.iv() == null || item.iv().isBlank()
+                || item.tag() == null || item.tag().isBlank()) {
+            throw new BusinessException(40002, "同步密文格式不完整");
+        }
+    }
+
+    private void pushRecord(String userId, String deviceId, String keyFingerprint, SyncPushRequest.Item item) {
         var existing = syncRecordMapper.selectOneIncludingDeleted(userId, item.table(), item.clientId());
 
         var now = LocalDateTime.now();
@@ -66,6 +91,7 @@ public class BackendSyncService {
         if (existing == null) {
             var record = new SyncRecord();
             record.setUserId(userId);
+            record.setKeyFingerprint(keyFingerprint);
             record.setTableName(item.table());
             record.setClientId(item.clientId());
             record.setPayloadCipher(item.cipher());
@@ -86,6 +112,7 @@ public class BackendSyncService {
 
         long serverVersion = existing.getVersion() != null ? existing.getVersion() : 0L;
         if (version >= serverVersion) {
+            existing.setKeyFingerprint(keyFingerprint);
             existing.setPayloadCipher(item.cipher());
             existing.setPayloadIv(item.iv());
             existing.setPayloadTag(item.tag());
@@ -101,7 +128,9 @@ public class BackendSyncService {
         }
     }
 
-    public List<SyncPullItem> pull(String userId, long sinceMs, int limit) {
+    public List<SyncPullItem> pull(String userId, String keyFingerprint, long sinceMs, int limit) {
+        var normalizedFingerprint = normalizeFingerprint(keyFingerprint);
+        keyRetentionService.markUsed(userId, normalizedFingerprint);
         var since = sinceMs > 0
                 ? fromEpochMilli(sinceMs)
                 : LocalDateTime.of(2000, 1, 1, 0, 0);
@@ -110,7 +139,7 @@ public class BackendSyncService {
         var items = new ArrayList<SyncPullItem>();
 
         syncRecordMapper
-                .selectByUserSince(userId, since, cappedLimit)
+                .selectByUserSinceAndKey(userId, normalizedFingerprint, since, cappedLimit)
                 .stream()
                 .map(record -> new SyncPullItem(
                         record.getTableName(),
@@ -154,6 +183,10 @@ public class BackendSyncService {
                 .sorted(Comparator.comparingLong(SyncPullItem::clientUpdatedAt))
                 .limit(cappedLimit)
                 .toList();
+    }
+
+    private String normalizeFingerprint(String keyFingerprint) {
+        return keyFingerprint == null ? "" : keyFingerprint.trim();
     }
 
     private String writeMeta(Map<String, Object> meta) {

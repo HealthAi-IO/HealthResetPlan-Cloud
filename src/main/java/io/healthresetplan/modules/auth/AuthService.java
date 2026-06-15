@@ -1,10 +1,12 @@
 package io.healthresetplan.modules.auth;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.common.util.HashUtils;
 import io.healthresetplan.common.util.JwtUtils;
 import io.healthresetplan.config.JwtProperties;
+import io.healthresetplan.modules.sync.KeyRetentionService;
 import io.healthresetplan.modules.auth.dto.LoginRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
@@ -42,17 +44,20 @@ public class AuthService {
     private final UserAccountMapper accountMapper;
     private final UserCredentialMapper credentialMapper;
     private final UserSessionMapper sessionMapper;
+    private final KeyRetentionService keyRetentionService;
     private final JwtUtils jwtUtils;
     private final JwtProperties jwtProperties;
 
     public AuthService(UserAccountMapper accountMapper,
                        UserCredentialMapper credentialMapper,
                        UserSessionMapper sessionMapper,
+                       KeyRetentionService keyRetentionService,
                        JwtUtils jwtUtils,
                        JwtProperties jwtProperties) {
         this.accountMapper = accountMapper;
         this.credentialMapper = credentialMapper;
         this.sessionMapper = sessionMapper;
+        this.keyRetentionService = keyRetentionService;
         this.jwtUtils = jwtUtils;
         this.jwtProperties = jwtProperties;
     }
@@ -154,6 +159,35 @@ public class AuthService {
         // access token 无状态、短期自然过期；只需删除 DB session
         sessionMapper.delete(new LambdaQueryWrapper<UserSession>()
                 .eq(UserSession::getRefreshToken, refreshToken));
+    }
+
+    @Transactional
+    public void cancelAccount(String userId) {
+        if (userId == null || userId.isBlank()) {
+            throw new BusinessException(40101, "请先登录账号");
+        }
+
+        UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
+                .eq(UserAccount::getUserId, userId));
+        if (account == null) {
+            throw new BusinessException(40401, "账号不存在");
+        }
+        if (account.getStatus() != null && account.getStatus() == -1) {
+            keyRetentionService.startRetentionForAccount(userId);
+            return;
+        }
+
+        var now = LocalDateTime.now();
+        accountMapper.update(null, new LambdaUpdateWrapper<UserAccount>()
+                .eq(UserAccount::getUserId, userId)
+                .set(UserAccount::getStatus, -1)
+                .set(UserAccount::getHasCloudSync, 0)
+                .set(UserAccount::getUpdatedAt, now));
+
+        sessionMapper.delete(new LambdaQueryWrapper<UserSession>()
+                .eq(UserSession::getUserId, userId));
+
+        keyRetentionService.startRetentionForAccount(userId);
     }
 
     public PasswordResetCodeResponse sendPasswordResetCode(PasswordResetCodeRequest req) {

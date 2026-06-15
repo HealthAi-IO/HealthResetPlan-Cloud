@@ -5,7 +5,6 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.annotation.Version;
 
 import java.time.LocalDateTime;
 
@@ -16,6 +15,7 @@ public class SyncRecord {
     private Long id;
 
     private String userId;
+    private String keyFingerprint;
     private String tableName;
     private String clientId;
     private String payloadCipher;
@@ -32,7 +32,6 @@ public class SyncRecord {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime deletedAt;
 
-    @Version
     private Long version;
 
     public Long getId() { return id; }
@@ -40,6 +39,9 @@ public class SyncRecord {
 
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }
+
+    public String getKeyFingerprint() { return keyFingerprint; }
+    public void setKeyFingerprint(String keyFingerprint) { this.keyFingerprint = keyFingerprint; }
 
     public String getTableName() { return tableName; }
     public void setTableName(String tableName) { this.tableName = tableName; }

@@ -30,7 +30,6 @@ public class HealthIndicator {
     @TableField(updateStrategy = FieldStrategy.IGNORED)
     private LocalDateTime deletedAt;
 
-    @Version
     private Long version;
 
     public Long getId() { return id; }

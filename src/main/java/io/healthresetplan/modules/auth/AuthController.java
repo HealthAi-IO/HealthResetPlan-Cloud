@@ -10,6 +10,7 @@ import io.healthresetplan.modules.auth.dto.RegisterRequest;
 import io.healthresetplan.modules.auth.dto.TokenResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -43,6 +44,13 @@ public class AuthController {
     @PostMapping("/logout")
     public R<Void> logout(@Valid @RequestBody RefreshRequest req) {
         authService.logout(req.getRefreshToken());
+        return R.ok();
+    }
+
+    @PostMapping("/cancel-account")
+    public R<Void> cancelAccount() {
+        String userId = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        authService.cancelAccount(userId);
         return R.ok();
     }
 
