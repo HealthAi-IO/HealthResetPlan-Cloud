@@ -14,6 +14,7 @@ import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
 import io.healthresetplan.modules.auth.dto.RefreshRequest;
 import io.healthresetplan.modules.auth.dto.RegisterRequest;
 import io.healthresetplan.modules.auth.dto.TokenResponse;
+import io.healthresetplan.modules.sms.SmsVerificationService;
 import io.healthresetplan.modules.user.entity.UserAccount;
 import io.healthresetplan.modules.user.entity.UserCredential;
 import io.healthresetplan.modules.user.entity.UserSession;
@@ -28,18 +29,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.security.SecureRandom;
-import java.util.UUID;
 
 @Service
 public class AuthService {
 
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder();
-    private static final SecureRandom RANDOM = new SecureRandom();
-    private static final long RESET_CODE_TTL_SECONDS = 10 * 60L;
-    private static final Map<String, ResetCode> RESET_CODES = new ConcurrentHashMap<>();
 
     private final UserAccountMapper accountMapper;
     private final UserCredentialMapper credentialMapper;
@@ -47,19 +41,22 @@ public class AuthService {
     private final KeyRetentionService keyRetentionService;
     private final JwtUtils jwtUtils;
     private final JwtProperties jwtProperties;
+    private final SmsVerificationService smsVerificationService;
 
     public AuthService(UserAccountMapper accountMapper,
                        UserCredentialMapper credentialMapper,
                        UserSessionMapper sessionMapper,
                        KeyRetentionService keyRetentionService,
                        JwtUtils jwtUtils,
-                       JwtProperties jwtProperties) {
+                       JwtProperties jwtProperties,
+                       SmsVerificationService smsVerificationService) {
         this.accountMapper = accountMapper;
         this.credentialMapper = credentialMapper;
         this.sessionMapper = sessionMapper;
         this.keyRetentionService = keyRetentionService;
         this.jwtUtils = jwtUtils;
         this.jwtProperties = jwtProperties;
+        this.smsVerificationService = smsVerificationService;
     }
 
     // ── 注册 ─────────────────────────────────────────────────
@@ -191,33 +188,38 @@ public class AuthService {
     }
 
     public PasswordResetCodeResponse sendPasswordResetCode(PasswordResetCodeRequest req) {
-        UserCredential cred = findCredential(req.getCredType(), req.getIdentifier());
+        String credType = normalizeCredType(req.getCredType());
+        String identifier = normalizeIdentifier(credType, req.getIdentifier());
+        UserCredential cred = findCredential(credType, identifier);
         if (cred == null) {
             throw new BusinessException(40401, "账号不存在");
         }
+        if (!"phone".equals(credType)) {
+            throw new BusinessException(40003, "暂不支持邮箱验证码，请使用手机号找回密码");
+        }
 
-        String code = String.format("%06d", RANDOM.nextInt(1_000_000));
-        String key = resetKey(req.getCredType(), req.getIdentifier());
-        RESET_CODES.put(key, new ResetCode(code, System.currentTimeMillis() + RESET_CODE_TTL_SECONDS * 1000));
-
-        // TODO 接入真实短信/邮件服务。当前开发版返回 debugCode，并在日志中打印，方便联调。
-        System.out.printf("[password-reset] %s %s code=%s%n", req.getCredType(), req.getIdentifier(), code);
-        return new PasswordResetCodeResponse(code, RESET_CODE_TTL_SECONDS);
+        SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
+                SmsVerificationService.SCENE_PASSWORD_RESET,
+                identifier
+        );
+        return new PasswordResetCodeResponse(result.debugCode(), result.expiresIn());
     }
 
     @Transactional
     public void resetPassword(PasswordResetRequest req) {
-        String key = resetKey(req.getCredType(), req.getIdentifier());
-        ResetCode cached = RESET_CODES.get(key);
-        if (cached == null || cached.expiresAtMs < System.currentTimeMillis()) {
-            RESET_CODES.remove(key);
-            throw new BusinessException(40001, "验证码已过期，请重新获取");
-        }
-        if (!cached.code.equals(req.getCode())) {
-            throw new BusinessException(40002, "验证码错误");
+        String credType = normalizeCredType(req.getCredType());
+        String identifier = normalizeIdentifier(credType, req.getIdentifier());
+        if (!"phone".equals(credType)) {
+            throw new BusinessException(40003, "暂不支持邮箱验证码，请使用手机号找回密码");
         }
 
-        UserCredential cred = findCredential(req.getCredType(), req.getIdentifier());
+        smsVerificationService.verifyPhoneCode(
+                SmsVerificationService.SCENE_PASSWORD_RESET,
+                identifier,
+                req.getCode()
+        );
+
+        UserCredential cred = findCredential(credType, identifier);
         if (cred == null) {
             throw new BusinessException(40401, "账号不存在");
         }
@@ -227,7 +229,6 @@ public class AuthService {
 
         sessionMapper.delete(new LambdaQueryWrapper<UserSession>()
                 .eq(UserSession::getUserId, cred.getUserId()));
-        RESET_CODES.remove(key);
     }
 
     // ── 内部 ─────────────────────────────────────────────────
@@ -268,15 +269,6 @@ public class AuthService {
                 .eq(UserCredential::getCredType, normalizedCredType)
                 .eq(UserCredential::getIdentifierHash, HashUtils.sha256Hex(identifier)));
     }
-
-    private String resetKey(String credType, String identifier) {
-        String normalizedCredType = normalizeCredType(credType);
-        return normalizedCredType + ":" + HashUtils.sha256Hex(
-                normalizeIdentifier(normalizedCredType, identifier)
-        );
-    }
-
-    private record ResetCode(String code, long expiresAtMs) {}
 
     private static String nullToEmpty(String s) {
         return s == null ? "" : s;

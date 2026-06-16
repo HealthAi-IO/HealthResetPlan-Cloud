@@ -3,7 +3,6 @@ package io.healthresetplan.modules.user.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.annotation.Version;
 
 import java.time.LocalDateTime;
 
@@ -26,7 +25,6 @@ public class UserKeyMeta {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    @Version
     private Long version;
 
     public Long getId() { return id; }

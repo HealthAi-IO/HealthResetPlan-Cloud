@@ -72,6 +72,14 @@ public class OneApiService {
     }
 
     public String complete(String userId, List<ChatCompletionMessageParam> messages, String preferredProvider) {
+        return complete(userId, messages, preferredProvider, 2048L);
+    }
+
+    public String complete(
+            String userId,
+            List<ChatCompletionMessageParam> messages,
+            String preferredProvider,
+            long maxCompletionTokens) {
         checkAndIncrementDailyLimit(userId);
 
         for (String providerName : providerOrder(preferredProvider)) {
@@ -84,7 +92,7 @@ public class OneApiService {
                         ChatCompletionCreateParams.builder()
                                 .model(model)
                                 .messages(messages)
-                                .maxCompletionTokens(2048L)
+                                .maxCompletionTokens(maxCompletionTokens)
                                 .build());
 
                 String content = response.choices().get(0).message().content().orElse("");

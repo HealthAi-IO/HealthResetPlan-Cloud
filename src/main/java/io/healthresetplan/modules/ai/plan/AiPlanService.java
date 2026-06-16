@@ -1,61 +1,88 @@
 package io.healthresetplan.modules.ai.plan;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.common.util.HashUtils;
+import io.healthresetplan.modules.ai.oneapi.OneApiProperties;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import io.healthresetplan.modules.membership.MembershipService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class AiPlanService {
 
     private static final Logger log = LoggerFactory.getLogger(AiPlanService.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String CACHE_PREFIX = "hrp:ai:plan:";
+    private static final String PLAN_PROMPT_VERSION = "v2-fast";
 
     private static final String SYSTEM_PROMPT = """
-            你是「健康重启计划」专属健康管理顾问 AI，擅长高血压、高血脂、糖尿病前期及体重管理。
-
-            请根据用户健康档案，生成个性化的 7 天健康管理方案。
-
-            【重要】严格按照以下 JSON 格式输出，禁止包含代码块标记（```）或任何额外文字：
+            你是健康管理顾问。根据用户档案生成 7 天健康方案，只输出可 JSON.parse 的纯 JSON，不要 Markdown。
+            必须完全符合结构：
             {
-              "summary": "本周方案概要，30字以内",
-              "keyFocus": "本周核心目标，15字以内",
-              "riskAlert": "健康风险提示（若无异常填 null）",
+              "summary": "20字内",
+              "keyFocus": "12字内",
+              "riskAlert": null,
               "targetCalories": 1800,
               "days": [
                 {
                   "dayIndex": 1,
                   "weekDay": "周一",
                   "diet": {
-                    "breakfast": "早餐具体描述",
-                    "lunch": "午餐具体描述",
-                    "dinner": "晚餐具体描述",
-                    "snack": "加餐建议",
-                    "notes": "当日饮食要点"
+                    "breakfast": "燕麦30g+蛋1个",
+                    "lunch": "糙米100g+鸡胸100g",
+                    "dinner": "鱼100g+青菜300g",
+                    "snack": "无糖酸奶100g",
+                    "notes": "低盐控油"
                   },
                   "exercise": {
                     "type": "运动类型",
                     "durationMinutes": 30,
                     "intensity": "低强度",
-                    "description": "具体运动建议"
+                    "description": "快走30分钟"
                   },
-                  "reminders": ["提醒1", "提醒2"]
+                  "reminders": ["晨起称重", "晚间记录血压"]
                 }
               ]
             }
-            只输出纯 JSON，饮食建议具体到食材和份量，不作诊断，指标异常须在 riskAlert 提示就医。
+            约束：
+            1. days 正好 7 条，dayIndex 为 1-7，weekDay 从周一到周日。
+            2. 每餐 18 字内，notes 10 字内，exercise.description 16 字内，reminders 最多 2 条。
+            3. 食材要有份量；不作诊断；指标异常只在 riskAlert 简短提醒就医。
+            """;
+
+    private static final String REPAIR_PROMPT = """
+            你只负责把用户给出的 AI 健康方案修复为完整合法 JSON。
+            严格保留以下顶层字段：summary、keyFocus、riskAlert、targetCalories、days。
+            days 必须正好 7 天；每一天必须包含 dayIndex、weekDay、diet、exercise、reminders。
+            diet 必须包含 breakfast、lunch、dinner、snack、notes。
+            exercise 必须包含 type、durationMinutes、intensity、description。
+            只输出纯 JSON，不要 Markdown，不要解释。
             """;
 
     private final OneApiService oneApiService;
     private final MembershipService membershipService;
+    private final OneApiProperties oneApiProperties;
+    private final StringRedisTemplate redisTemplate;
 
-    public AiPlanService(OneApiService oneApiService, MembershipService membershipService) {
+    public AiPlanService(OneApiService oneApiService,
+                         MembershipService membershipService,
+                         OneApiProperties oneApiProperties,
+                         StringRedisTemplate redisTemplate) {
         this.oneApiService = oneApiService;
         this.membershipService = membershipService;
+        this.oneApiProperties = oneApiProperties;
+        this.redisTemplate = redisTemplate;
     }
 
     public AiPlanResponse generate(String userId, AiPlanRequest req) {
@@ -71,8 +98,21 @@ public class AiPlanService {
         String preferredProvider = req.provider() != null && !req.provider().isBlank()
                 ? req.provider()
                 : null;
-        String rawJson = oneApiService.complete(userId, messages, preferredProvider);
-        rawJson = cleanJson(rawJson);
+        String cacheKey = cacheKey(userId, req, preferredProvider);
+        String cachedJson = readCachedPlan(cacheKey);
+        if (cachedJson != null) {
+            log.info("AI 计划命中缓存 userId={}", userId);
+            return new AiPlanResponse(preferredProvider != null ? preferredProvider : "auto", cachedJson, 0, 0);
+        }
+
+        long maxCompletionTokens = Math.max(1200L, oneApiProperties.getPlanMaxCompletionTokens());
+        String rawJson = oneApiService.complete(
+                userId,
+                messages,
+                preferredProvider,
+                maxCompletionTokens);
+        rawJson = normalizePlanJson(rawJson, userId, preferredProvider, maxCompletionTokens);
+        cachePlan(cacheKey, rawJson);
 
         log.info("AI 计划生成成功 userId={}", userId);
         return new AiPlanResponse(preferredProvider != null ? preferredProvider : "auto", rawJson, 0, 0);
@@ -100,29 +140,50 @@ public class AiPlanService {
             default -> "几乎无运动习惯";
         };
 
-        StringBuilder sb = new StringBuilder("【用户健康档案】\n");
-        sb.append("- 性别：").append(gender).append("，年龄：").append(req.age()).append(" 岁\n");
-        sb.append("- 身高：").append(req.heightCm()).append(" cm，体重：").append(req.weightKg())
-                .append(" kg，BMI：").append(String.format("%.1f", req.bmi())).append("\n");
+        StringBuilder sb = new StringBuilder("档案：");
+        sb.append(gender).append("，").append(req.age()).append("岁，");
+        sb.append(req.heightCm()).append("cm/").append(req.weightKg())
+                .append("kg，BMI=").append(String.format("%.1f", req.bmi()));
         if (req.recentBp() != null && !req.recentBp().isBlank())
-            sb.append("- 最近血压：").append(req.recentBp()).append(" mmHg\n");
+            sb.append("，血压=").append(req.recentBp());
         if (req.recentGlucose() != null)
-            sb.append("- 空腹血糖：").append(req.recentGlucose()).append(" mmol/L\n");
+            sb.append("，空腹血糖=").append(req.recentGlucose());
         if (req.recentTc() != null) {
-            sb.append("- 总胆固醇：").append(req.recentTc()).append(" mmol/L");
-            if (req.recentLdl() != null) sb.append("，LDL：").append(req.recentLdl()).append(" mmol/L");
-            sb.append("\n");
+            sb.append("，TC=").append(req.recentTc());
+            if (req.recentLdl() != null) sb.append("，LDL=").append(req.recentLdl());
         }
         if (req.medicalHistory() != null && !req.medicalHistory().isBlank())
-            sb.append("- 健康史：").append(req.medicalHistory()).append("\n");
-        sb.append("- 目标：").append(goal)
-                .append("，饮食：").append(diet)
-                .append("，运动基础：").append(exercise).append("\n");
-        sb.append("\n请生成符合以上档案的 7 天健康管理方案（JSON 格式）。");
+            sb.append("，健康史=").append(req.medicalHistory());
+        sb.append("。目标=").append(goal)
+                .append("；饮食=").append(diet)
+                .append("；运动基础=").append(exercise)
+                .append("。生成短 JSON。");
         return sb.toString();
     }
 
-    private String cleanJson(String raw) {
+    private String normalizePlanJson(String raw, String userId, String preferredProvider, long maxCompletionTokens) {
+        String json = extractJson(raw);
+        if (isUsablePlan(json)) {
+            return json;
+        }
+
+        log.warn("AI 计划 JSON 格式异常，尝试修复 userId={}", userId);
+        String repaired = oneApiService.complete(
+                userId,
+                List.of(
+                        OneApiService.systemMsg(REPAIR_PROMPT),
+                        OneApiService.userMsg("请修复下面的方案内容：\n" + (raw != null ? raw : ""))),
+                preferredProvider,
+                maxCompletionTokens);
+        json = extractJson(repaired);
+        if (isUsablePlan(json)) {
+            return json;
+        }
+
+        throw new BusinessException(50301, "AI 方案格式异常，请重试或切换模型");
+    }
+
+    private String extractJson(String raw) {
         if (raw == null) return "{}";
         String s = raw.trim();
         if (s.startsWith("```")) {
@@ -130,6 +191,69 @@ public class AiPlanService {
             int end = s.lastIndexOf("```");
             if (start > 0 && end > start) s = s.substring(start + 1, end).trim();
         }
+        int first = s.indexOf('{');
+        int last = s.lastIndexOf('}');
+        if (first >= 0 && last > first) {
+            return s.substring(first, last + 1).trim();
+        }
         return s;
+    }
+
+    private String cacheKey(String userId, AiPlanRequest req, String preferredProvider) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("version", PLAN_PROMPT_VERSION);
+            payload.put("userId", userId);
+            payload.put("provider", preferredProvider != null ? preferredProvider : "auto");
+            payload.put("request", req);
+            return CACHE_PREFIX + HashUtils.sha256Hex(MAPPER.writeValueAsString(payload));
+        } catch (Exception e) {
+            return CACHE_PREFIX + HashUtils.sha256Hex(PLAN_PROMPT_VERSION + ":" + userId + ":" + req);
+        }
+    }
+
+    private String readCachedPlan(String key) {
+        if (oneApiProperties.getPlanCacheMinutes() <= 0) {
+            return null;
+        }
+        try {
+            String cached = redisTemplate.opsForValue().get(key);
+            return cached != null && isUsablePlan(cached) ? cached : null;
+        } catch (Exception e) {
+            log.debug("读取 AI 计划缓存失败，继续实时生成: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private void cachePlan(String key, String json) {
+        int cacheMinutes = oneApiProperties.getPlanCacheMinutes();
+        if (cacheMinutes <= 0) {
+            return;
+        }
+        try {
+            redisTemplate.opsForValue().set(key, json, Duration.ofMinutes(cacheMinutes));
+        } catch (Exception e) {
+            log.debug("写入 AI 计划缓存失败: {}", e.getMessage());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean isUsablePlan(String rawJson) {
+        try {
+            Map<String, Object> root = MAPPER.readValue(rawJson, new TypeReference<>() {});
+            Object daysRaw = root.get("days");
+            if (!(daysRaw instanceof List<?> days) || days.size() != 7) {
+                return false;
+            }
+            for (Object dayRaw : days) {
+                if (!(dayRaw instanceof Map<?, ?> day)) return false;
+                if (!(day.get("diet") instanceof Map<?, ?>)) return false;
+                if (!(day.get("exercise") instanceof Map<?, ?>)) return false;
+                if (!(day.get("reminders") instanceof List<?>)) return false;
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

@@ -54,6 +54,12 @@ public class OneApiProperties {
     /** HTTP 请求超时秒数 */
     private int timeoutSeconds = 90;
 
+    /** 7 天健康规划缓存分钟数；相同档案、目标、模型命中后直接返回。 */
+    private int planCacheMinutes = 30;
+
+    /** 7 天健康规划最大输出 token，控制生成时长和截断风险。 */
+    private long planMaxCompletionTokens = 2200L;
+
     public Map<String, ProviderConfig> getProviders() { return providers; }
     public void setProviders(Map<String, ProviderConfig> providers) { this.providers = providers; }
 
@@ -68,6 +74,14 @@ public class OneApiProperties {
 
     public int getTimeoutSeconds() { return timeoutSeconds; }
     public void setTimeoutSeconds(int timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
+
+    public int getPlanCacheMinutes() { return planCacheMinutes; }
+    public void setPlanCacheMinutes(int planCacheMinutes) { this.planCacheMinutes = planCacheMinutes; }
+
+    public long getPlanMaxCompletionTokens() { return planMaxCompletionTokens; }
+    public void setPlanMaxCompletionTokens(long planMaxCompletionTokens) {
+        this.planMaxCompletionTokens = planMaxCompletionTokens;
+    }
 
     // ── 单个厂商配置 ──────────────────────────────────────────
 

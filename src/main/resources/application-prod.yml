@@ -19,11 +19,30 @@ app:
     secret: ${JWT_SECRET}
     access-ttl-minutes: 60
     refresh-ttl-days: 30
+  sms:
+    enabled: ${SMS_ENABLED:false}
+    debug-code-enabled: ${SMS_DEBUG_CODE_ENABLED:false}
+    provider: jdcloud
+    region-id: ${SMS_REGION_ID:cn-north-1}
+    code-ttl-seconds: ${SMS_CODE_TTL_SECONDS:600}
+    resend-interval-seconds: ${SMS_RESEND_INTERVAL_SECONDS:60}
+    max-per-phone-per-hour: ${SMS_MAX_PER_PHONE_PER_HOUR:5}
+    max-per-phone-per-day: ${SMS_MAX_PER_PHONE_PER_DAY:20}
+    jdcloud:
+      access-key-id: ${JDCLOUD_ACCESS_KEY_ID:}
+      secret-access-key: ${JDCLOUD_SECRET_ACCESS_KEY:}
+      sign-id: ${JDCLOUD_SMS_SIGN_ID:}
+      template-id: ${JDCLOUD_SMS_TEMPLATE_ID:}
+      endpoint: ${JDCLOUD_SMS_ENDPOINT:sms.jdcloud-api.com}
+      connect-timeout-millis: ${JDCLOUD_SMS_CONNECT_TIMEOUT_MILLIS:3000}
+      read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
   ai:
     chat-order: [qwen, doubao, deepseek]
     vision-provider: ${AI_CHAT_VISION_PROVIDER:qwen}
     daily-limit: ${AI_CHAT_DAILY_LIMIT:30}
     timeout-seconds: ${AI_CHAT_TIMEOUT_SECONDS:120}
+    plan-cache-minutes: ${AI_PLAN_CACHE_MINUTES:30}
+    plan-max-completion-tokens: ${AI_PLAN_MAX_COMPLETION_TOKENS:2200}
     providers:
       deepseek:
         base-url: ${AI_CHAT_DEEPSEEK_API_BASE:https://ark.cn-beijing.volces.com/api/v3}

@@ -4,6 +4,11 @@ spring:
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
   flyway:
     enabled: true
     baseline-on-migrate: true
@@ -20,6 +25,23 @@ app:
     # 开发环境：access 100 年、refresh 100 年，相当于不过期；生产环境请改回合理值
     access-ttl-minutes: 52560000
     refresh-ttl-days: 36500
+  sms:
+    enabled: ${SMS_ENABLED:false}
+    debug-code-enabled: ${SMS_DEBUG_CODE_ENABLED:true}
+    provider: jdcloud
+    region-id: ${SMS_REGION_ID:cn-north-1}
+    code-ttl-seconds: ${SMS_CODE_TTL_SECONDS:600}
+    resend-interval-seconds: ${SMS_RESEND_INTERVAL_SECONDS:60}
+    max-per-phone-per-hour: ${SMS_MAX_PER_PHONE_PER_HOUR:5}
+    max-per-phone-per-day: ${SMS_MAX_PER_PHONE_PER_DAY:20}
+    jdcloud:
+      access-key-id: ${JDCLOUD_ACCESS_KEY_ID:}
+      secret-access-key: ${JDCLOUD_SECRET_ACCESS_KEY:}
+      sign-id: ${JDCLOUD_SMS_SIGN_ID:}
+      template-id: ${JDCLOUD_SMS_TEMPLATE_ID:}
+      endpoint: ${JDCLOUD_SMS_ENDPOINT:sms.jdcloud-api.com}
+      connect-timeout-millis: ${JDCLOUD_SMS_CONNECT_TIMEOUT_MILLIS:3000}
+      read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
   ai:
     # 对话/计划生成厂商优先级：依次尝试，失败自动降级
     chat-order: [qwen, doubao, deepseek]
@@ -29,6 +51,9 @@ app:
     daily-limit: 30
     # 请求超时秒数
     timeout-seconds: 120
+    # 7 天健康规划：短期缓存同一档案请求，并限制输出长度来提高速度
+    plan-cache-minutes: ${AI_PLAN_CACHE_MINUTES:30}
+    plan-max-completion-tokens: ${AI_PLAN_MAX_COMPLETION_TOKENS:2200}
     providers:
       qwen:
         base-url: ${AI_CHAT_QWEN_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}

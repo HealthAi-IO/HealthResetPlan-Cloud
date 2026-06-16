@@ -29,10 +29,18 @@ http://localhost:8080/api/v1/health
 | `DB_USERNAME` / `DB_PASSWORD` | MySQL 凭据 |
 | `REDIS_HOST` / `REDIS_PORT` | Redis 主机 |
 | `JWT_SECRET` | JWT 签名密钥 |
+| `SMS_ENABLED` | 是否启用真实短信发送，生产环境填 `true` |
+| `SMS_DEBUG_CODE_ENABLED` | 是否在接口响应中返回调试验证码，生产环境必须为 `false` |
+| `JDCLOUD_ACCESS_KEY_ID` / `JDCLOUD_SECRET_ACCESS_KEY` | 京东云访问密钥 |
+| `JDCLOUD_SMS_SIGN_ID` / `JDCLOUD_SMS_TEMPLATE_ID` | 京东云短信审核通过后的签名 ID / 模板 ID |
+| `SMS_CODE_TTL_SECONDS` / `SMS_RESEND_INTERVAL_SECONDS` | 验证码有效期 / 单手机号发送间隔 |
+| `SMS_MAX_PER_PHONE_PER_HOUR` / `SMS_MAX_PER_PHONE_PER_DAY` | 单手机号每小时 / 每日发送上限 |
 | `AI_CHAT_DEEPSEEK_API_KEY` / `AI_CHAT_DOUBAO_API_KEY` / `AI_CHAT_QWEN_API_KEY` | AI 厂商 Key |
 | `AI_CHAT_DEEPSEEK_API_BASE` / `AI_CHAT_DOUBAO_API_BASE` / `AI_CHAT_QWEN_API_BASE` | AI 厂商 OpenAI 兼容接口地址 |
 | `AI_CHAT_DEEPSEEK_MODEL` / `AI_CHAT_DOUBAO_MODEL` / `AI_CHAT_QWEN3_VL_PLUS_MODEL` | AI 模型名称 |
 | `AI_CHAT_DEEPSEEK_WEB_SEARCH_MODEL` | DeepSeek 联网搜索 Bot 应用 ID |
+| `AI_PLAN_CACHE_MINUTES` | 7 天健康规划缓存分钟数，默认 30 |
+| `AI_PLAN_MAX_COMPLETION_TOKENS` | 7 天健康规划最大输出 token，默认 2200 |
 
 ## 配置位置
 
@@ -42,3 +50,18 @@ AI 配置位于：
 - `src/main/resources/application-prod.yml`
 
 后端代码通过 `app.ai.providers.*` 读取这些配置。
+
+## 短信验证码
+
+密码重置接口 `/api/v1/auth/password-reset/send-code` 已接入 Redis 验证码缓存和手机号防刷限流。
+
+京东云短信 SDK 调用代码已预写在 `src/main/java/io/healthresetplan/modules/sms/JdcloudSmsSender.java`。备案和短信签名/模板审核通过后，生产环境填入：
+
+- `SMS_ENABLED=true`
+- `JDCLOUD_ACCESS_KEY_ID`
+- `JDCLOUD_SECRET_ACCESS_KEY`
+- `JDCLOUD_SMS_SIGN_ID`
+- `JDCLOUD_SMS_TEMPLATE_ID`
+
+模板变量按一个参数传入，默认第一个参数为 6 位验证码。
+开发环境默认 `SMS_ENABLED=false` 且 `SMS_DEBUG_CODE_ENABLED=true`，不会真实发送短信，会返回调试验证码；生产环境请保持 `SMS_DEBUG_CODE_ENABLED=false`。
