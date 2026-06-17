@@ -163,6 +163,7 @@ public class OneApiService {
     }
 
     public String analyzeImage(String userId, String imageBase64, String mimeType, String prompt) {
+        long startedAt = System.currentTimeMillis();
         if (userId != null) checkAndIncrementDailyLimit(userId);
 
         String providerName = props.getVisionProvider();
@@ -195,21 +196,31 @@ public class OneApiService {
                     ChatCompletionCreateParams.builder()
                             .model(model)
                             .messages(List.of(userMessage))
-                            .maxCompletionTokens(4096L)
+                            .maxCompletionTokens(2048L)
                             .build());
 
-            return response.choices().get(0).message().content().orElse("");
+            String content = response.choices().get(0).message().content().orElse("");
+            log.info("OCR complete provider={} model={} userId={} elapsedMs={} imageBase64Chars={} outputChars={}",
+                    providerName,
+                    model,
+                    userId,
+                    System.currentTimeMillis() - startedAt,
+                    imageBase64 == null ? 0 : imageBase64.length(),
+                    content.length());
+            return content;
         } catch (RateLimitException e) {
             throw new BusinessException(42901, "今日 AI 请求次数已达上限，请明日再试");
         } catch (UnauthorizedException e) {
             throw new BusinessException(40101, "视觉模型 Key 无效：" + providerName);
         } catch (UnexpectedStatusCodeException e) {
-            log.error("OCR failed provider={} status={}", providerName, e.statusCode());
+            log.error("OCR failed provider={} status={} elapsedMs={}",
+                    providerName, e.statusCode(), System.currentTimeMillis() - startedAt);
             throw new BusinessException(50301, "OCR 识别失败，请检查视觉模型配置");
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("OCR failed provider={}", providerName, e);
+            log.error("OCR failed provider={} elapsedMs={}",
+                    providerName, System.currentTimeMillis() - startedAt, e);
             throw new BusinessException(50301, "OCR 识别失败，请稍后重试");
         }
     }

@@ -56,6 +56,27 @@ public class ReportService {
             4. status 根据参考范围判断；无法判断时填 unknown。
             """;
 
+    private static final String OCR_FAST_PROMPT = """
+            Read the uploaded medical/lab report image and return strict JSON only.
+            Schema:
+            {
+              "reportDate": "YYYY-MM-DD or null",
+              "indicators": [
+                {
+                  "category": "blood_sugar|blood_lipid|blood_pressure|liver|kidney|cbc|thyroid|urine|ecg|imaging|other",
+                  "name": "original item name",
+                  "value": "original value or conclusion",
+                  "unit": "unit or empty string",
+                  "referenceRange": "reference range or empty string",
+                  "status": "normal|high|low|unknown"
+                }
+              ],
+              "summary": "short Chinese summary within 40 chars",
+              "rawText": "main recognized report text"
+            }
+            Rules: no markdown; extract visible medical indicators only; keep original names, units and ranges; no diagnosis.
+            """;
+
     private final HealthReportMapper reportMapper;
     private final OneApiService oneApiService;
 
@@ -65,6 +86,7 @@ public class ReportService {
     }
 
     public AnalyzeResponse analyze(MultipartFile file) {
+        long startedAt = System.currentTimeMillis();
         if (file == null || file.isEmpty()) {
             throw new BusinessException(40001, "图片不能为空");
         }
@@ -76,6 +98,7 @@ public class ReportService {
         if (file.getSize() > MAX_SIZE_BYTES) {
             throw new BusinessException(40001, "图片大小不能超过 10MB");
         }
+        log.info("Report OCR accepted mimeType={} sizeBytes={}", mimeType, file.getSize());
 
         byte[] bytes;
         try {
@@ -85,7 +108,10 @@ public class ReportService {
         }
 
         String base64 = Base64.getEncoder().encodeToString(bytes);
-        String rawJson = oneApiService.analyzeImage(null, base64, mimeType, OCR_PROMPT);
+        String rawJson = oneApiService.analyzeImage(null, base64, mimeType, OCR_FAST_PROMPT);
+        log.info("Report OCR finished elapsedMs={} rawLength={}",
+                System.currentTimeMillis() - startedAt,
+                rawJson == null ? 0 : rawJson.length());
         return parseAnalyzeResult(rawJson, oneApiService.visionProviderLabel());
     }
 
