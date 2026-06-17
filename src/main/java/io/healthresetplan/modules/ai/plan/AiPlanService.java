@@ -14,6 +14,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -106,16 +108,29 @@ public class AiPlanService {
         }
 
         long maxCompletionTokens = Math.max(1200L, oneApiProperties.getPlanMaxCompletionTokens());
-        String rawJson = oneApiService.complete(
-                userId,
-                messages,
-                preferredProvider,
-                maxCompletionTokens);
-        rawJson = normalizePlanJson(rawJson, userId, preferredProvider, maxCompletionTokens);
+        String rawJson = null;
+        String usedProvider = preferredProvider != null ? preferredProvider : "auto";
+        for (String provider : planProviderOrder(preferredProvider)) {
+            String candidate = oneApiService.complete(
+                    userId,
+                    messages,
+                    provider,
+                    maxCompletionTokens);
+            String json = extractJson(candidate);
+            if (isUsablePlan(json)) {
+                rawJson = json;
+                usedProvider = provider;
+                break;
+            }
+            log.warn("AI plan JSON invalid, trying next provider userId={} provider={}", userId, provider);
+        }
+        if (rawJson == null) {
+            throw new BusinessException(50301, "AI 方案格式异常，请重试或切换模型");
+        }
         cachePlan(cacheKey, rawJson);
 
         log.info("AI 计划生成成功 userId={}", userId);
-        return new AiPlanResponse(preferredProvider != null ? preferredProvider : "auto", rawJson, 0, 0);
+        return new AiPlanResponse(usedProvider, rawJson, 0, 0);
     }
 
     // ── 内部 ─────────────────────────────────────────────────────
@@ -235,6 +250,15 @@ public class AiPlanService {
         } catch (Exception e) {
             log.debug("写入 AI 计划缓存失败: {}", e.getMessage());
         }
+    }
+
+    private List<String> planProviderOrder(String preferredProvider) {
+        LinkedHashSet<String> ordered = new LinkedHashSet<>();
+        if (preferredProvider != null && !preferredProvider.isBlank()) {
+            ordered.add(preferredProvider.trim());
+        }
+        ordered.addAll(oneApiProperties.getChatOrder());
+        return new ArrayList<>(ordered);
     }
 
     @SuppressWarnings("unchecked")
