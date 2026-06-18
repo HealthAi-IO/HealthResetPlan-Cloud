@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -40,9 +41,47 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+                        .requestMatchers(
+                                "/api/v1/admin/auth/login",
+                                "/api/v1/admin/auth/refresh",
+                                "/api/v1/admin/auth/logout"
+                        ).permitAll()
+                        .requestMatchers(
+                                "/api/v1/admin/system/admins/**",
+                                "/api/v1/admin/system/roles"
+                        ).hasRole("SUPER_ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/users/**")
+                        .hasAnyAuthority("PERM_user:read", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/vip/**")
+                        .hasAnyAuthority("PERM_vip:read", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/orders/**")
+                        .hasAnyAuthority("PERM_order:read", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/platforms/**")
+                        .hasAnyAuthority("PERM_platform:read", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/releases/**")
+                        .hasAnyAuthority("PERM_release:read", "PERM_release:write", "PERM_*")
+                        .requestMatchers("/api/v1/admin/releases/**")
+                        .hasAnyAuthority("PERM_release:write", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/content/templates/**")
+                        .hasAnyAuthority("PERM_plan:read", "PERM_plan:write", "PERM_*")
+                        .requestMatchers("/api/v1/admin/content/templates/**")
+                        .hasAnyAuthority("PERM_plan:write", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/ai/**")
+                        .hasAnyAuthority("PERM_ai:read", "PERM_ai:write", "PERM_*")
+                        .requestMatchers("/api/v1/admin/ai/**")
+                        .hasAnyAuthority("PERM_ai:write", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/reminders/**")
+                        .hasAnyAuthority("PERM_reminder:read", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/feedback/**")
+                        .hasAnyAuthority("PERM_feedback:read", "PERM_feedback:write", "PERM_*")
+                        .requestMatchers("/api/v1/admin/feedback/**")
+                        .hasAnyAuthority("PERM_feedback:write", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/system/summary")
+                        .hasAnyAuthority("PERM_audit:read", "PERM_*")
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers(
                                 "/api/v1/auth/**",
+                                "/api/v1/releases/check",
                                 "/api/v1/membership/callback/**",  // 支付回调由网关签名保障
                                 "/api/v1/files/avatar/**",         // 头像公开可读
                                 "/api/v1/health",
@@ -93,6 +132,8 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOriginPatterns(List.of(
+                "https://admin.jkcqplan.com",
+                "https://api.jkcqplan.com",
                 "http://localhost:*",
                 "http://127.0.0.1:*",
                 "http://192.168.*.*:*"

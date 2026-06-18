@@ -51,6 +51,22 @@ AI 配置位于：
 
 后端代码通过 `app.ai.providers.*` 读取这些配置。
 
+本地密钥文件 `application-local.yml` 已被 Git 忽略，其中也只应引用环境变量，禁止写入真实密钥。
+
+## 管理后台安全边界
+
+- 管理员账号保存在 `admin_account`，会话保存在 `admin_session`。
+- 管理员 JWT 包含 `actorType=admin`；普通用户 JWT 不会获得 `ROLE_ADMIN`。
+- 超级管理员、运营和审计角色从 `admin_role` 加载权限。
+- 登录、退出、发布和工单处理等写操作记录到 `audit_log`。
+- 配置了 `totp_secret` 的管理员必须通过 TOTP 动态验证码校验。
+
+客户端公开版本检查接口：
+
+```text
+GET /api/v1/releases/check
+```
+
 ## 短信验证码
 
 密码重置接口 `/api/v1/auth/password-reset/send-code` 已接入 Redis 验证码缓存和手机号防刷限流。

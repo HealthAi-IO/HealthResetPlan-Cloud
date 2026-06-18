@@ -21,6 +21,8 @@ import java.util.Date;
 public class JwtUtils {
 
     private static final String CLAIM_TYPE = "type";
+    private static final String CLAIM_ACTOR_TYPE = "actorType";
+    private static final String CLAIM_ROLE_CODE = "roleCode";
     private static final String TYPE_ACCESS = "access";
     private static final String TYPE_REFRESH = "refresh";
 
@@ -35,25 +37,23 @@ public class JwtUtils {
     // ── 生成 ─────────────────────────────────────────────────
 
     public String generateAccessToken(String userId) {
-        long now = System.currentTimeMillis();
-        return Jwts.builder()
-                .subject(userId)
-                .claim(CLAIM_TYPE, TYPE_ACCESS)
-                .issuedAt(new Date(now))
-                .expiration(new Date(now + props.getAccessTtlMinutes() * 60_000L))
-                .signWith(key)
-                .compact();
+        return generateToken(userId, TYPE_ACCESS, "user", "user",
+                props.getAccessTtlMinutes() * 60_000L);
     }
 
     public String generateRefreshToken(String userId) {
-        long now = System.currentTimeMillis();
-        return Jwts.builder()
-                .subject(userId)
-                .claim(CLAIM_TYPE, TYPE_REFRESH)
-                .issuedAt(new Date(now))
-                .expiration(new Date(now + props.getRefreshTtlDays() * 86_400_000L))
-                .signWith(key)
-                .compact();
+        return generateToken(userId, TYPE_REFRESH, "user", "user",
+                props.getRefreshTtlDays() * 86_400_000L);
+    }
+
+    public String generateAdminAccessToken(long adminId, String roleCode) {
+        return generateToken(String.valueOf(adminId), TYPE_ACCESS, "admin", roleCode,
+                props.getAccessTtlMinutes() * 60_000L);
+    }
+
+    public String generateAdminRefreshToken(long adminId, String roleCode) {
+        return generateToken(String.valueOf(adminId), TYPE_REFRESH, "admin", roleCode,
+                props.getRefreshTtlDays() * 86_400_000L);
     }
 
     // ── 校验 ─────────────────────────────────────────────────
@@ -72,6 +72,16 @@ public class JwtUtils {
     /** 从合法 token 中提取 userId（subject）。 */
     public String extractUserId(String token) {
         return parse(token).getSubject();
+    }
+
+    public String extractActorType(String token) {
+        String actorType = parse(token).get(CLAIM_ACTOR_TYPE, String.class);
+        return actorType == null || actorType.isBlank() ? "user" : actorType;
+    }
+
+    public String extractRoleCode(String token) {
+        String roleCode = parse(token).get(CLAIM_ROLE_CODE, String.class);
+        return roleCode == null ? "" : roleCode;
     }
 
     /** 判断是否为 access token。 */
@@ -95,5 +105,22 @@ public class JwtUtils {
     /** 返回 refresh token 到期时间（毫秒时间戳）。 */
     public long getRefreshExpiry(String token) {
         return parse(token).getExpiration().getTime();
+    }
+
+    private String generateToken(String subject,
+                                 String type,
+                                 String actorType,
+                                 String roleCode,
+                                 long ttlMillis) {
+        long now = System.currentTimeMillis();
+        return Jwts.builder()
+                .subject(subject)
+                .claim(CLAIM_TYPE, type)
+                .claim(CLAIM_ACTOR_TYPE, actorType)
+                .claim(CLAIM_ROLE_CODE, roleCode)
+                .issuedAt(new Date(now))
+                .expiration(new Date(now + ttlMillis))
+                .signWith(key)
+                .compact();
     }
 }

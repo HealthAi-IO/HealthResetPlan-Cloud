@@ -18,6 +18,9 @@ public class UserSession {
 
     private String userId;
     private String deviceId;
+    private String platform;
+    private String appVersion;
+    private String channel;
     private String refreshToken;
     private String ip;
     private String userAgent;
@@ -34,6 +37,15 @@ public class UserSession {
 
     public String getDeviceId() { return deviceId; }
     public void setDeviceId(String deviceId) { this.deviceId = deviceId; }
+
+    public String getPlatform() { return platform; }
+    public void setPlatform(String platform) { this.platform = platform; }
+
+    public String getAppVersion() { return appVersion; }
+    public void setAppVersion(String appVersion) { this.appVersion = appVersion; }
+
+    public String getChannel() { return channel; }
+    public void setChannel(String channel) { this.channel = channel; }
 
     public String getRefreshToken() { return refreshToken; }
     public void setRefreshToken(String refreshToken) { this.refreshToken = refreshToken; }
