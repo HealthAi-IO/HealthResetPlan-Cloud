@@ -133,6 +133,9 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOriginPatterns(List.of(
                 "https://admin.jkcqplan.com",
+                "https://app.jkcqplan.com",
+                "https://jkcqplan.com",
+                "https://www.jkcqplan.com",
                 "https://api.jkcqplan.com",
                 "http://localhost:*",
                 "http://127.0.0.1:*",
