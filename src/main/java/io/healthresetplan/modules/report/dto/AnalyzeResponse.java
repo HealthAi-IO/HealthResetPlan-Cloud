@@ -7,6 +7,7 @@ public class AnalyzeResponse {
     private String reportDate;
     private List<Indicator> indicators;
     private String summary;
+    private String analysisAdvice;
     private String rawText;
     private String provider;
     private String model;
@@ -46,6 +47,9 @@ public class AnalyzeResponse {
 
     public String getSummary() { return summary; }
     public void setSummary(String summary) { this.summary = summary; }
+
+    public String getAnalysisAdvice() { return analysisAdvice; }
+    public void setAnalysisAdvice(String analysisAdvice) { this.analysisAdvice = analysisAdvice; }
 
     public String getRawText() { return rawText; }
     public void setRawText(String rawText) { this.rawText = rawText; }

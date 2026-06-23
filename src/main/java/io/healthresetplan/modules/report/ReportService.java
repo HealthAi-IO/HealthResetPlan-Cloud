@@ -46,14 +46,17 @@ public class ReportService {
                 }
               ],
               "summary": "一句话总结本次报告重点，80 字以内",
+              "analysisAdvice": "基于报告内容给出简短分析和建议，必须说明 AI 不能代替医生诊断，只提供健康管理建议",
               "rawText": "图片中识别到的主要文字"
             }
 
             要求：
             1. 逐行提取图片里所有医学指标、检查项目和影像结论，不只提取异常项。
             2. 每个指标必须独立放入 indicators 数组，保留原始指标名、数值、单位和参考范围。
-            3. 若报告日期无法识别，reportDate 填 null。
-            4. status 根据参考范围判断；无法判断时填 unknown。
+            3. 若没有具体医学指标，indicators 返回空数组，但 rawText 必须保留报告可见内容。
+            4. 无论是否有指标，都必须生成 analysisAdvice。
+            5. 若报告日期无法识别，reportDate 填 null。
+            6. status 根据参考范围判断；无法判断时填 unknown。
             """;
 
     private static final String OCR_FAST_PROMPT = """
@@ -72,9 +75,11 @@ public class ReportService {
                 }
               ],
               "summary": "short Chinese summary within 40 chars",
+              "analysisAdvice": "short Chinese analysis and advice; must say AI cannot replace a doctor and is only for health suggestions",
               "rawText": "main recognized report text"
             }
-            Rules: no markdown; extract visible medical indicators only; keep original names, units and ranges; no diagnosis.
+            Rules: no markdown; extract visible medical indicators when present; if no indicators, keep report content in rawText;
+            always generate analysisAdvice; no diagnosis.
             """;
 
     private final HealthReportMapper reportMapper;
@@ -159,7 +164,23 @@ public class ReportService {
     }
 
     private AnalyzeResponse parseAnalyzeResult(String rawJson, String provider) {
-        String json = rawJson == null ? "" : rawJson.trim();
+        String json = extractJsonObject(rawJson);
+
+        try {
+            AnalyzeResponse response = MAPPER.readValue(json, AnalyzeResponse.class);
+            return normalizeAnalyzeResponse(response, provider);
+        } catch (Exception e) {
+            log.warn("LLM OCR JSON parse failed, falling back to raw text: {}", e.getMessage());
+            AnalyzeResponse fallback = new AnalyzeResponse();
+            fallback.setRawText(rawJson);
+            fallback.setSummary("报告已识别，请人工核对原文");
+            fallback.setIndicators(List.of());
+            return normalizeAnalyzeResponse(fallback, provider);
+        }
+    }
+
+    private String extractJsonObject(String raw) {
+        String json = raw == null ? "" : raw.trim();
         if (json.startsWith("```")) {
             int start = json.indexOf('\n');
             int end = json.lastIndexOf("```");
@@ -167,19 +188,27 @@ public class ReportService {
                 json = json.substring(start + 1, end).trim();
             }
         }
-
-        try {
-            AnalyzeResponse response = MAPPER.readValue(json, AnalyzeResponse.class);
-            response.setProvider(provider);
-            return response;
-        } catch (Exception e) {
-            log.warn("LLM OCR JSON parse failed, falling back to raw text: {}", e.getMessage());
-            AnalyzeResponse fallback = new AnalyzeResponse();
-            fallback.setRawText(rawJson);
-            fallback.setSummary("报告已识别，请人工核对原文");
-            fallback.setProvider(provider);
-            return fallback;
+        int first = json.indexOf('{');
+        int last = json.lastIndexOf('}');
+        if (first >= 0 && last > first) {
+            return json.substring(first, last + 1).trim();
         }
+        return json;
+    }
+
+    private AnalyzeResponse normalizeAnalyzeResponse(AnalyzeResponse response, String provider) {
+        response.setProvider(provider);
+        if (response.getIndicators() == null) {
+            response.setIndicators(List.of());
+        }
+        String advice = response.getAnalysisAdvice();
+        if (advice == null || advice.isBlank()) {
+            advice = "AI 已根据报告内容生成初步分析建议。AI 不能代替医生诊断，只提供健康管理建议；如有异常结果、不适症状或用药调整需求，请及时咨询医生。";
+        } else if (!advice.contains("不能代替医生") && !advice.contains("不代替医生")) {
+            advice = advice.trim() + " AI 不能代替医生诊断，只提供健康管理建议；如有异常结果、不适症状或用药调整需求，请及时咨询医生。";
+        }
+        response.setAnalysisAdvice(advice);
+        return response;
     }
 
     private void fillFields(HealthReport report, ReportSaveRequest req) {

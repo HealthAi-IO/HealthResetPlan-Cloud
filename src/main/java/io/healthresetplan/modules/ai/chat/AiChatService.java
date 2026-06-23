@@ -14,6 +14,9 @@ import java.util.function.Consumer;
 @Service
 public class AiChatService {
 
+    private static final String AI_DOCTOR_DISCLAIMER =
+            "AI 不能代替医生诊断，只提供健康管理建议；如有异常或症状加重，请及时就医。";
+
     private static final String SYSTEM_PROMPT =
             "你是「健康重启计划」专属健康顾问 AI，负责帮助用户进行日常健康管理。\n\n"
           + "职责：\n"
@@ -21,6 +24,7 @@ public class AiChatService {
           + "2. 基于用户健康数据给出个性化建议\n"
           + "3. 积极鼓励用户坚持健康习惯\n\n"
           + "注意：不作诊断；涉及用药调整或症状加重，务必建议就医。"
+          + "每次回答都必须包含“AI 不能代替医生诊断，只提供健康管理建议”含义的提醒。"
           + "回答简洁（200字以内），使用简体中文，语气亲切。";
 
     private final OneApiService oneApiService;
@@ -43,7 +47,7 @@ public class AiChatService {
         String content = oneApiService.complete(userId, msgs, req.provider());
         return new AiChatResponse(
                 req.provider() == null || req.provider().isBlank() ? "oneapi" : req.provider(),
-                content,
+                withAiDoctorDisclaimer(content),
                 0,
                 0
         );
@@ -57,7 +61,17 @@ public class AiChatService {
                            Runnable onDone) {
         checkMembership(userId);
         List<ChatCompletionMessageParam> msgs = buildMessages(req);
-        oneApiService.stream(userId, msgs, req.provider(), tokenConsumer, onDone);
+        StringBuilder content = new StringBuilder();
+        oneApiService.stream(userId, msgs, req.provider(), token -> {
+            content.append(token);
+            tokenConsumer.accept(token);
+        }, () -> {
+            String finalText = content.toString();
+            if (!hasAiDoctorDisclaimer(finalText)) {
+                tokenConsumer.accept("\n\n" + AI_DOCTOR_DISCLAIMER);
+            }
+            onDone.run();
+        });
     }
 
     // ── 配额查询 ─────────────────────────────────────────────────
@@ -76,6 +90,18 @@ public class AiChatService {
         if (!membershipService.hasFeature(userId, "cloud_sync")) {
             throw new BusinessException(40301, "AI 对话是会员专属功能，请先开通会员");
         }
+    }
+
+    private String withAiDoctorDisclaimer(String content) {
+        if (content == null || content.isBlank() || hasAiDoctorDisclaimer(content)) {
+            return content;
+        }
+        return content.trim() + "\n\n" + AI_DOCTOR_DISCLAIMER;
+    }
+
+    private boolean hasAiDoctorDisclaimer(String content) {
+        return content != null
+                && (content.contains("不能代替医生") || content.contains("不代替医生"));
     }
 
     private List<ChatCompletionMessageParam> buildMessages(AiChatRequest req) {
