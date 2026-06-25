@@ -2,6 +2,7 @@ package io.healthresetplan.modules.admin;
 
 import io.healthresetplan.common.result.R;
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
@@ -33,9 +34,11 @@ public class AdminController {
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder();
 
     private final JdbcTemplate jdbc;
+    private final OneApiService oneApiService;
 
-    public AdminController(JdbcTemplate jdbc) {
+    public AdminController(JdbcTemplate jdbc, OneApiService oneApiService) {
         this.jdbc = jdbc;
+        this.oneApiService = oneApiService;
     }
 
     @GetMapping("/dashboard")
@@ -84,29 +87,98 @@ public class AdminController {
         }
 
         Long total = queryLong("SELECT COUNT(*) FROM user_account ua" + where, countArgs);
+        // Page first, then aggregate only the current page's users. This keeps admin
+        // user list latency stable when health/sync rows grow with user volume.
         String sql = """
-                SELECT
-                  ua.user_id,
-                  ua.custom_id,
-                  ua.phone_tail,
-                  ua.nickname,
-                  ua.avatar_url,
-                  ua.status,
-                  ua.role_code,
-                  ua.has_cloud_sync,
-                  ua.created_at,
-                  ua.updated_at,
-                  (SELECT MAX(us.created_at) FROM user_session us WHERE us.user_id = ua.user_id) AS last_login_at,
-                  ((SELECT COUNT(*) FROM health_indicator hi WHERE hi.user_id = ua.user_id AND hi.deleted_at IS NULL)
-                   + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_indicator' AND sr.deleted_at IS NULL)) AS indicator_count,
-                  ((SELECT COUNT(*) FROM health_report hr WHERE hr.user_id = ua.user_id AND hr.deleted_at IS NULL)
-                   + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_report' AND sr.deleted_at IS NULL)) AS report_count,
-                  (SELECT COUNT(*) FROM user_subscription sub WHERE sub.user_id = ua.user_id AND sub.status = 'active' AND sub.expires_at > NOW(3)) AS active_subscription_count,
-                  (SELECT MAX(sub.expires_at) FROM user_subscription sub WHERE sub.user_id = ua.user_id AND sub.status = 'active') AS member_expires_at
-                FROM user_account ua
+                WITH page_users AS (
+                  SELECT
+                    ua.user_id,
+                    ua.custom_id,
+                    ua.phone_tail,
+                    ua.nickname,
+                    ua.avatar_url,
+                    ua.status,
+                    ua.role_code,
+                    ua.has_cloud_sync,
+                    ua.created_at,
+                    ua.updated_at
+                  FROM user_account ua
                 """ + where + """
-                ORDER BY ua.created_at DESC
-                LIMIT ? OFFSET ?
+                  ORDER BY ua.created_at DESC
+                  LIMIT ? OFFSET ?
+                ),
+                login_stats AS (
+                  SELECT us.user_id, MAX(us.created_at) AS last_login_at
+                  FROM user_session us
+                  JOIN page_users pu ON pu.user_id = us.user_id
+                  GROUP BY us.user_id
+                ),
+                indicator_stats AS (
+                  SELECT agg_source.user_id, SUM(agg_source.row_count) AS indicator_count
+                  FROM (
+                    SELECT hi.user_id, COUNT(*) AS row_count
+                    FROM health_indicator hi
+                    JOIN page_users pu ON pu.user_id = hi.user_id
+                    WHERE hi.deleted_at IS NULL
+                    GROUP BY hi.user_id
+                    UNION ALL
+                    SELECT sr.user_id, COUNT(*) AS row_count
+                    FROM sync_record sr
+                    JOIN page_users pu ON pu.user_id = sr.user_id
+                    WHERE sr.table_name = 'health_indicator' AND sr.deleted_at IS NULL
+                    GROUP BY sr.user_id
+                  ) agg_source
+                  GROUP BY agg_source.user_id
+                ),
+                report_stats AS (
+                  SELECT agg_source.user_id, SUM(agg_source.row_count) AS report_count
+                  FROM (
+                    SELECT hr.user_id, COUNT(*) AS row_count
+                    FROM health_report hr
+                    JOIN page_users pu ON pu.user_id = hr.user_id
+                    WHERE hr.deleted_at IS NULL
+                    GROUP BY hr.user_id
+                    UNION ALL
+                    SELECT sr.user_id, COUNT(*) AS row_count
+                    FROM sync_record sr
+                    JOIN page_users pu ON pu.user_id = sr.user_id
+                    WHERE sr.table_name = 'health_report' AND sr.deleted_at IS NULL
+                    GROUP BY sr.user_id
+                  ) agg_source
+                  GROUP BY agg_source.user_id
+                ),
+                subscription_stats AS (
+                  SELECT
+                    sub.user_id,
+                    COUNT(*) AS active_subscription_count,
+                    MAX(sub.expires_at) AS member_expires_at
+                  FROM user_subscription sub
+                  JOIN page_users pu ON pu.user_id = sub.user_id
+                  WHERE sub.status = 'active' AND sub.expires_at > NOW(3)
+                  GROUP BY sub.user_id
+                )
+                SELECT
+                  pu.user_id,
+                  pu.custom_id,
+                  pu.phone_tail,
+                  pu.nickname,
+                  pu.avatar_url,
+                  pu.status,
+                  pu.role_code,
+                  pu.has_cloud_sync,
+                  pu.created_at,
+                  pu.updated_at,
+                  ls.last_login_at,
+                  COALESCE(ins.indicator_count, 0) AS indicator_count,
+                  COALESCE(rs.report_count, 0) AS report_count,
+                  COALESCE(ss.active_subscription_count, 0) AS active_subscription_count,
+                  ss.member_expires_at
+                FROM page_users pu
+                LEFT JOIN login_stats ls ON ls.user_id = pu.user_id
+                LEFT JOIN indicator_stats ins ON ins.user_id = pu.user_id
+                LEFT JOIN report_stats rs ON rs.user_id = pu.user_id
+                LEFT JOIN subscription_stats ss ON ss.user_id = pu.user_id
+                ORDER BY pu.created_at DESC
                 """;
 
         List<Map<String, Object>> rows = jdbc.queryForList(sql, listArgs).stream()
@@ -946,6 +1018,7 @@ public class AdminController {
 
         Long providerId = queryLong("SELECT LAST_INSERT_ID()");
         Map<String, Object> providerRow = getProviderById(providerId != null ? providerId : 0L);
+        oneApiService.reloadClients();
         writeAuditLog(request, "ai_provider_created", "ai_provider_config:" + number(providerRow.get("id")), providerAuditDetail("created", null, providerRow));
         return R.ok(providerRow);
     }
@@ -993,6 +1066,7 @@ public class AdminController {
         }
 
         Map<String, Object> after = getProviderById(providerId);
+        oneApiService.reloadClients();
         writeAuditLog(request, "ai_provider_updated", "ai_provider_config:" + providerId, providerAuditDetail("updated", before, after));
         return R.ok(after);
     }

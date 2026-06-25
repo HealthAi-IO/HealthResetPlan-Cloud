@@ -17,6 +17,7 @@ import io.healthresetplan.common.exception.BusinessException;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -37,17 +38,27 @@ public class OneApiService {
     private static final Logger log = LoggerFactory.getLogger(OneApiService.class);
 
     private final OneApiProperties props;
-    private final Map<String, OpenAIClient> clients = new HashMap<>();
+    private final JdbcTemplate jdbc;
+    private volatile Map<String, OpenAIClient> clients = Map.of();
+    private volatile Map<String, OneApiProperties.ProviderConfig> providerConfigs = Map.of();
     private final Map<String, AtomicLong> dailyCounters = new ConcurrentHashMap<>();
     private volatile LocalDate counterDate = LocalDate.now();
 
-    public OneApiService(OneApiProperties props) {
+    public OneApiService(OneApiProperties props, JdbcTemplate jdbc) {
         this.props = props;
+        this.jdbc = jdbc;
     }
 
     @PostConstruct
     void initClients() {
-        props.getProviders().forEach((name, cfg) -> {
+        reloadClients();
+    }
+
+    public synchronized void reloadClients() {
+        Map<String, OneApiProperties.ProviderConfig> nextConfigs = loadProviderConfigs();
+        Map<String, OpenAIClient> nextClients = new HashMap<>();
+
+        nextConfigs.forEach((name, cfg) -> {
             if (!cfg.isConfigured()) {
                 log.warn("AI provider [{}] is not configured, skipped", name);
                 return;
@@ -58,13 +69,38 @@ public class OneApiService {
                     .baseUrl(baseUrl)
                     .timeout(Duration.ofSeconds(props.getTimeoutSeconds()))
                     .build();
-            clients.put(name, client);
+            nextClients.put(name, client);
             log.info("AI provider [{}] initialized, model={}", name, cfg.getModel());
         });
 
-        if (clients.isEmpty()) {
+        providerConfigs = nextConfigs;
+        clients = Map.copyOf(nextClients);
+
+        if (nextClients.isEmpty()) {
             log.warn("No AI provider is configured. AI features will be unavailable.");
         }
+    }
+
+    private Map<String, OneApiProperties.ProviderConfig> loadProviderConfigs() {
+        Map<String, OneApiProperties.ProviderConfig> configs = new HashMap<>(props.getProviders());
+        try {
+            jdbc.queryForList("""
+                    SELECT provider, base_url, model, api_key_cipher
+                    FROM ai_provider_config
+                    WHERE deleted_at IS NULL
+                      AND status = 1
+                      AND api_key_cipher <> ''
+                    """).forEach(row -> {
+                OneApiProperties.ProviderConfig cfg = new OneApiProperties.ProviderConfig();
+                cfg.setBaseUrl(text(row.get("base_url")));
+                cfg.setApiKey(text(row.get("api_key_cipher")));
+                cfg.setModel(text(row.get("model")));
+                configs.put(text(row.get("provider")), cfg);
+            });
+        } catch (Exception e) {
+            log.warn("Load AI providers from database failed, fallback to application config: {}", e.getMessage());
+        }
+        return configs;
     }
 
     public String complete(String userId, List<ChatCompletionMessageParam> messages) {
@@ -86,7 +122,7 @@ public class OneApiService {
             OpenAIClient client = clients.get(providerName);
             if (client == null) continue;
 
-            String model = props.getProviders().get(providerName).getModel();
+            String model = providerConfigs.get(providerName).getModel();
             try {
                 var response = client.chat().completions().create(
                         ChatCompletionCreateParams.builder()
@@ -132,7 +168,7 @@ public class OneApiService {
             OpenAIClient client = clients.get(providerName);
             if (client == null) continue;
 
-            String model = props.getProviders().get(providerName).getModel();
+            String model = providerConfigs.get(providerName).getModel();
             try {
                 try (var streamResponse = client.chat().completions().createStreaming(
                         ChatCompletionCreateParams.builder()
@@ -172,7 +208,7 @@ public class OneApiService {
             throw new BusinessException(50301, "视觉模型厂商 [" + providerName + "] 未配置");
         }
 
-        String model = props.getProviders().get(providerName).getModel();
+        String model = providerConfigs.get(providerName).getModel();
         ensureVisionCapableModel(providerName, model);
 
         try {
@@ -227,7 +263,7 @@ public class OneApiService {
 
     public String visionProviderLabel() {
         String providerName = props.getVisionProvider();
-        var provider = props.getProviders().get(providerName);
+        var provider = providerConfigs.get(providerName);
         String model = provider != null ? provider.getModel() : "";
         return model == null || model.isBlank() ? providerName : providerName + " / " + model;
     }
@@ -296,6 +332,10 @@ public class OneApiService {
         }
         ordered.addAll(props.getChatOrder());
         return new ArrayList<>(ordered);
+    }
+
+    private String text(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private String normalizeBaseUrl(String rawBaseUrl) {
