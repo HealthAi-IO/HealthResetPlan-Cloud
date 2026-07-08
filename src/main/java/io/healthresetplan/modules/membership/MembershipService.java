@@ -44,6 +44,7 @@ public class MembershipService {
             "VIP365", "yearly",
             "TRIAL7", "monthly"
     );
+    private static final int APP_PAY_TEST_AMOUNT_FEN = 1;
 
     private final MembershipPlanMapper planMapper;
     private final UserSubscriptionMapper subscriptionMapper;
@@ -98,16 +99,13 @@ public class MembershipService {
 
     /** 判断用户是否拥有云同步权益（实时查询，比 has_cloud_sync 字段更准确）。 */
     public boolean hasCloudSync(String userId) {
-        return hasFeature(userId, "cloud_sync");
+        // 应用市场上架版本暂时关闭会员权益限制，所有登录用户均可使用。
+        return true;
     }
 
     public boolean hasFeature(String userId, String feature) {
-        UserSubscription sub = findActiveSub(userId);
-        if (sub == null) return false;
-        MembershipPlan plan = planMapper.selectOne(new LambdaQueryWrapper<MembershipPlan>()
-                .eq(MembershipPlan::getCode, sub.getPlanCode()));
-        if (plan == null) return false;
-        return parseFeatures(plan.getFeatures()).contains(feature);
+        // 应用市场上架版本暂时关闭会员权益限制，所有登录用户均可使用。
+        return true;
     }
 
     // ── 创建支付订单 ──────────────────────────────────────────
@@ -122,11 +120,14 @@ public class MembershipService {
         }
 
         String orderNo = generateOrderNo(userId);
+        int amountFen = ("wechat".equals(req.getChannel()) || "alipay".equals(req.getChannel()))
+                ? APP_PAY_TEST_AMOUNT_FEN
+                : plan.getPriceFen();
         PaymentOrder order = new PaymentOrder();
         order.setOrderNo(orderNo);
         order.setUserId(userId);
         order.setPlanCode(req.getPlanCode());
-        order.setAmountFen(plan.getPriceFen());
+        order.setAmountFen(amountFen);
         order.setChannel(req.getChannel());
         order.setChannelOrderNo("");
         order.setStatus("pending");
@@ -137,14 +138,14 @@ public class MembershipService {
         CreateOrderResponse resp = new CreateOrderResponse();
         resp.setOrderNo(orderNo);
         resp.setPlanCode(req.getPlanCode());
-        resp.setAmountFen(plan.getPriceFen());
+        resp.setAmountFen(amountFen);
         resp.setChannel(req.getChannel());
 
         PaymentGateway gateway = gateways.get(req.getChannel());
         if (gateway != null) {
             try {
                 PaymentGateway.PrepayResult result = gateway.prepay(new PaymentGateway.PrepayRequest(
-                        orderNo, userId, plan.getPriceFen(), plan.getName(), ""));
+                        orderNo, userId, amountFen, plan.getName(), ""));
                 resp.setPayCredential(result.credential());
             } catch (Exception e) {
                 log.error("预支付调用失败 channel={} orderNo={}", req.getChannel(), orderNo, e);
@@ -175,8 +176,12 @@ public class MembershipService {
 
         PaymentOrder order = orderMapper.selectOne(new LambdaQueryWrapper<PaymentOrder>()
                 .eq(PaymentOrder::getChannel, channel)
-                .eq(PaymentOrder::getChannelOrderNo, result.channelOrderNo()));
+                .eq(PaymentOrder::getOrderNo, result.orderNo()));
         if (order == null || !"pending".equals(order.getStatus())) return;
+        if (result.amountFen() != null && !result.amountFen().equals(order.getAmountFen())) {
+            log.warn("支付回调金额不匹配 channel={} orderNo={}", channel, result.orderNo());
+            throw new BusinessException(40003, "支付金额不匹配");
+        }
 
         order.setStatus("paid");
         order.setChannelOrderNo(result.channelOrderNo());

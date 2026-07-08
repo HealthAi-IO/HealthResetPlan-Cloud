@@ -11,6 +11,7 @@ import java.time.Duration;
 @Service
 public class SmsVerificationService {
 
+    public static final String SCENE_AUTH = "auth";
     public static final String SCENE_PASSWORD_RESET = "password-reset";
 
     private static final Logger log = LoggerFactory.getLogger(SmsVerificationService.class);

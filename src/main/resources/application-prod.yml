@@ -36,6 +36,24 @@ app:
       endpoint: ${JDCLOUD_SMS_ENDPOINT:sms.jdcloud-api.com}
       connect-timeout-millis: ${JDCLOUD_SMS_CONNECT_TIMEOUT_MILLIS:3000}
       read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
+  payment:
+    wechat:
+      enabled: ${WECHAT_PAY_ENABLED:false}
+      app-id: ${WECHAT_PAY_APP_ID:}
+      mch-id: ${WECHAT_PAY_MCH_ID:}
+      merchant-serial-number: ${WECHAT_PAY_MERCHANT_SERIAL_NUMBER:}
+      private-key-path: ${WECHAT_PAY_PRIVATE_KEY_PATH:}
+      public-key-id: ${WECHAT_PAY_PUBLIC_KEY_ID:}
+      public-key-path: ${WECHAT_PAY_PUBLIC_KEY_PATH:}
+      api-v3-key: ${WECHAT_PAY_API_V3_KEY:}
+      notify-url: ${WECHAT_PAY_NOTIFY_URL:https://api.jkcqplan.com/api/v1/membership/callback/wechat}
+    alipay:
+      enabled: ${ALIPAY_ENABLED:false}
+      app-id: ${ALIPAY_APP_ID:}
+      private-key: ${ALIPAY_PRIVATE_KEY:}
+      alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
+      notify-url: ${ALIPAY_NOTIFY_URL:https://api.jkcqplan.com/api/v1/membership/callback/alipay}
+      gateway-url: ${ALIPAY_GATEWAY_URL:https://openapi.alipay.com/gateway.do}
   ai:
     chat-order: [qwen, doubao, deepseek]
     vision-provider: ${AI_CHAT_VISION_PROVIDER:qwen}

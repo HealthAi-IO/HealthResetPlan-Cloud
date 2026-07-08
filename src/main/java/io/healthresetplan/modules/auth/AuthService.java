@@ -12,6 +12,8 @@ import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
 import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
 import io.healthresetplan.modules.auth.dto.RefreshRequest;
 import io.healthresetplan.modules.auth.dto.RegisterRequest;
+import io.healthresetplan.modules.auth.dto.SmsLoginCodeRequest;
+import io.healthresetplan.modules.auth.dto.SmsLoginRequest;
 import io.healthresetplan.modules.auth.dto.TokenResponse;
 import io.healthresetplan.modules.sms.SmsVerificationService;
 import io.healthresetplan.modules.sync.KeyRetentionService;
@@ -118,6 +120,43 @@ public class AuthService {
 
         backfillPhoneTail(account, req.getCredType(), req.getIdentifier());
         return buildTokensAndSession(credential.getUserId(), httpReq);
+    }
+
+    public PasswordResetCodeResponse sendSmsLoginCode(SmsLoginCodeRequest req) {
+        String phone = normalizePhone(req.getPhone());
+        validatePhone(phone);
+        SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
+                SmsVerificationService.SCENE_AUTH,
+                phone
+        );
+        return new PasswordResetCodeResponse(result.debugCode(), result.expiresIn());
+    }
+
+    @Transactional
+    public TokenResponse smsLogin(SmsLoginRequest req, HttpServletRequest httpReq) {
+        String phone = normalizePhone(req.getPhone());
+        validatePhone(phone);
+        smsVerificationService.verifyPhoneCode(SmsVerificationService.SCENE_AUTH, phone, req.getCode());
+
+        String identifierHash = HashUtils.sha256Hex(phone);
+        UserCredential credential = credentialMapper.selectOne(new LambdaQueryWrapper<UserCredential>()
+                .eq(UserCredential::getCredType, "phone")
+                .eq(UserCredential::getIdentifierHash, identifierHash));
+
+        String userId;
+        if (credential == null) {
+            userId = createPhoneAccount(phone, req.getNickname());
+        } else {
+            UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
+                    .eq(UserAccount::getUserId, credential.getUserId()));
+            if (account == null || account.getStatus() != 1) {
+                throw new BusinessException(40301, "account disabled");
+            }
+            backfillPhoneTail(account, "phone", phone);
+            userId = credential.getUserId();
+        }
+
+        return buildTokensAndSession(userId, httpReq);
     }
 
     @Transactional
@@ -259,6 +298,34 @@ public class AuthService {
                 .eq(UserCredential::getIdentifierHash, HashUtils.sha256Hex(identifier)));
     }
 
+    private String createPhoneAccount(String phone, String nickname) {
+        String userId = generateUserId();
+        LocalDateTime now = LocalDateTime.now();
+
+        UserAccount account = new UserAccount();
+        account.setUserId(userId);
+        account.setCustomId("");
+        account.setPhoneTail(phoneTail("phone", phone));
+        account.setNickname(nickname != null && !nickname.isBlank() ? nickname.trim() : "健康用户");
+        account.setStatus(1);
+        account.setRoleCode("user");
+        account.setHasCloudSync(0);
+        account.setCreatedAt(now);
+        account.setUpdatedAt(now);
+        accountMapper.insert(account);
+
+        UserCredential credential = new UserCredential();
+        credential.setUserId(userId);
+        credential.setCredType("phone");
+        credential.setIdentifierHash(HashUtils.sha256Hex(phone));
+        credential.setSecretHash("");
+        credential.setCreatedAt(now);
+        credential.setUpdatedAt(now);
+        credentialMapper.insert(credential);
+
+        return userId;
+    }
+
     private static String nullToEmpty(String value) {
         return value == null ? "" : value;
     }
@@ -269,7 +336,20 @@ public class AuthService {
 
     private static String normalizeIdentifier(String credType, String identifier) {
         String value = identifier == null ? "" : identifier.trim();
+        if ("phone".equals(credType)) {
+            return normalizePhone(value);
+        }
         return "email".equals(credType) ? value.toLowerCase() : value;
+    }
+
+    private static String normalizePhone(String phone) {
+        return phone == null ? "" : phone.replaceAll("\\D", "");
+    }
+
+    private static void validatePhone(String phone) {
+        if (phone == null || !phone.matches("^1\\d{10}$")) {
+            throw new BusinessException(40003, "phone format is invalid");
+        }
     }
 
     private void backfillPhoneTail(UserAccount account, String credType, String identifier) {

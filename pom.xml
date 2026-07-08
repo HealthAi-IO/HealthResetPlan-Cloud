@@ -24,6 +24,8 @@
         <springdoc.version>2.6.0</springdoc.version>
         <jjwt.version>0.12.6</jjwt.version>
         <openai.version>2.1.0</openai.version>
+        <alipay.version>4.40.272.ALL</alipay.version>
+        <wechatpay.version>0.2.17</wechatpay.version>
     </properties>
 
     <dependencies>
@@ -108,6 +110,18 @@
             <groupId>com.jdcloud.sdk</groupId>
             <artifactId>sms</artifactId>
             <version>1.3.3</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.wechatpay-apiv3</groupId>
+            <artifactId>wechatpay-java</artifactId>
+            <version>${wechatpay.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.alipay.sdk</groupId>
+            <artifactId>alipay-sdk-java</artifactId>
+            <version>${alipay.version}</version>
         </dependency>
 
         <!-- OpenAI Java SDK, compatible with OneAPI and OpenAI-compatible proxies. -->

@@ -1,5 +1,6 @@
 package io.healthresetplan.modules.membership;
 
+import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.common.result.R;
 import io.healthresetplan.modules.membership.dto.CreateOrderRequest;
 import io.healthresetplan.modules.membership.dto.CreateOrderResponse;
@@ -9,6 +10,8 @@ import io.healthresetplan.modules.membership.entity.MembershipPlan;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -55,19 +58,28 @@ public class MembershipController {
      * 此接口无需 JWT 认证，由支付网关签名保障安全。
      */
     @PostMapping("/callback/{channel}")
-    public String callback(@PathVariable String channel,
-                           HttpServletRequest request) throws IOException {
+    public ResponseEntity<?> callback(@PathVariable String channel,
+                                      HttpServletRequest request) throws IOException {
         Map<String, String> headers = extractHeaders(request);
         String body = new String(request.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        membershipService.handleCallback(channel, headers, body);
-        return "success";
+        try {
+            membershipService.handleCallback(channel, headers, body);
+            if ("alipay".equals(channel)) {
+                return ResponseEntity.ok("success");
+            }
+            return ResponseEntity.ok(Map.of("code", "SUCCESS", "message", "成功"));
+        } catch (BusinessException ex) {
+            if ("alipay".equals(channel)) {
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("fail");
+            }
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("code", "FAIL", "message", ex.getMessage()));
+        }
     }
 
     private Map<String, String> extractHeaders(HttpServletRequest request) {
-        return request.getHeaderNames().asIterator().next() == null
-                ? Map.of()
-                : java.util.Collections.list(request.getHeaderNames()).stream()
-                        .collect(Collectors.toMap(h -> h, request::getHeader, (a, b) -> a));
+        return java.util.Collections.list(request.getHeaderNames()).stream()
+                .collect(Collectors.toMap(h -> h, request::getHeader, (a, b) -> a));
     }
 
     private String currentUserId() {

@@ -42,7 +42,9 @@ public interface PaymentGateway {
     ) {}
 
     record CallbackResult(
+            String orderNo,
             String channelOrderNo,
-            boolean paid
+            boolean paid,
+            Integer amountFen
     ) {}
 }

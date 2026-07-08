@@ -7,6 +7,8 @@ import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
 import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
 import io.healthresetplan.modules.auth.dto.RefreshRequest;
 import io.healthresetplan.modules.auth.dto.RegisterRequest;
+import io.healthresetplan.modules.auth.dto.SmsLoginCodeRequest;
+import io.healthresetplan.modules.auth.dto.SmsLoginRequest;
 import io.healthresetplan.modules.auth.dto.TokenResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -34,6 +36,16 @@ public class AuthController {
     @PostMapping("/login")
     public R<TokenResponse> login(@Valid @RequestBody LoginRequest req, HttpServletRequest httpReq) {
         return R.ok(authService.login(req, httpReq));
+    }
+
+    @PostMapping("/sms/send-code")
+    public R<PasswordResetCodeResponse> sendSmsLoginCode(@Valid @RequestBody SmsLoginCodeRequest req) {
+        return R.ok(authService.sendSmsLoginCode(req));
+    }
+
+    @PostMapping("/sms/login")
+    public R<TokenResponse> smsLogin(@Valid @RequestBody SmsLoginRequest req, HttpServletRequest httpReq) {
+        return R.ok(authService.smsLogin(req, httpReq));
     }
 
     @PostMapping("/refresh")
