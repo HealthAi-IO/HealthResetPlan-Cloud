@@ -116,6 +116,14 @@ public class OneApiService {
             List<ChatCompletionMessageParam> messages,
             String preferredProvider,
             long maxCompletionTokens) {
+        return completeWithProvider(userId, messages, preferredProvider, maxCompletionTokens).content();
+    }
+
+    public AiCompletion completeWithProvider(
+            String userId,
+            List<ChatCompletionMessageParam> messages,
+            String preferredProvider,
+            long maxCompletionTokens) {
         checkAndIncrementDailyLimit(userId);
 
         for (String providerName : providerOrder(preferredProvider)) {
@@ -133,7 +141,7 @@ public class OneApiService {
 
                 String content = response.choices().get(0).message().content().orElse("");
                 log.info("AI complete ok provider={} model={} userId={}", providerName, model, userId);
-                return content;
+                return new AiCompletion(providerName, content);
             } catch (RateLimitException e) {
                 log.warn("AI rate limited provider={}", providerName);
                 throw new BusinessException(42901,
@@ -147,6 +155,8 @@ public class OneApiService {
 
         throw new BusinessException(50301, "所有 AI 厂商暂时不可用，请稍后重试");
     }
+
+    public record AiCompletion(String provider, String content) {}
 
     public void stream(
             String userId,

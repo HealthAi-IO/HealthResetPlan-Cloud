@@ -14,8 +14,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,15 +61,6 @@ public class AiPlanService {
             3. 食材要有份量；不作诊断；指标异常只在 riskAlert 简短提醒就医。
             """;
 
-    private static final String REPAIR_PROMPT = """
-            你只负责把用户给出的 AI 健康方案修复为完整合法 JSON。
-            严格保留以下顶层字段：summary、keyFocus、riskAlert、targetCalories、days。
-            days 必须正好 7 天；每一天必须包含 dayIndex、weekDay、diet、exercise、reminders。
-            diet 必须包含 breakfast、lunch、dinner、snack、notes。
-            exercise 必须包含 type、durationMinutes、intensity、description。
-            只输出纯 JSON，不要 Markdown，不要解释。
-            """;
-
     private final OneApiService oneApiService;
     private final MembershipService membershipService;
     private final OneApiProperties oneApiProperties;
@@ -108,29 +97,20 @@ public class AiPlanService {
         }
 
         long maxCompletionTokens = Math.max(1200L, oneApiProperties.getPlanMaxCompletionTokens());
-        String rawJson = null;
-        String usedProvider = preferredProvider != null ? preferredProvider : "auto";
-        for (String provider : planProviderOrder(preferredProvider)) {
-            String candidate = oneApiService.complete(
-                    userId,
-                    messages,
-                    provider,
-                    maxCompletionTokens);
-            String json = extractJson(candidate);
-            if (isUsablePlan(json)) {
-                rawJson = json;
-                usedProvider = provider;
-                break;
-            }
-            log.warn("AI plan JSON invalid, trying next provider userId={} provider={}", userId, provider);
-        }
-        if (rawJson == null) {
+        OneApiService.AiCompletion completion = oneApiService.completeWithProvider(
+                userId,
+                messages,
+                preferredProvider,
+                maxCompletionTokens);
+        String rawJson = extractJson(completion.content());
+        if (!isUsablePlan(rawJson)) {
+            log.warn("AI plan JSON invalid userId={} provider={}", userId, completion.provider());
             throw new BusinessException(50301, "AI 方案格式异常，请重试或切换模型");
         }
         cachePlan(cacheKey, rawJson);
 
-        log.info("AI 计划生成成功 userId={}", userId);
-        return new AiPlanResponse(usedProvider, rawJson, 0, 0);
+        log.info("AI 计划生成成功 userId={} provider={}", userId, completion.provider());
+        return new AiPlanResponse(completion.provider(), rawJson, 0, 0);
     }
 
     // ── 内部 ─────────────────────────────────────────────────────
@@ -174,28 +154,6 @@ public class AiPlanService {
                 .append("；运动基础=").append(exercise)
                 .append("。生成短 JSON。");
         return sb.toString();
-    }
-
-    private String normalizePlanJson(String raw, String userId, String preferredProvider, long maxCompletionTokens) {
-        String json = extractJson(raw);
-        if (isUsablePlan(json)) {
-            return json;
-        }
-
-        log.warn("AI 计划 JSON 格式异常，尝试修复 userId={}", userId);
-        String repaired = oneApiService.complete(
-                userId,
-                List.of(
-                        OneApiService.systemMsg(REPAIR_PROMPT),
-                        OneApiService.userMsg("请修复下面的方案内容：\n" + (raw != null ? raw : ""))),
-                preferredProvider,
-                maxCompletionTokens);
-        json = extractJson(repaired);
-        if (isUsablePlan(json)) {
-            return json;
-        }
-
-        throw new BusinessException(50301, "AI 方案格式异常，请重试或切换模型");
     }
 
     private String extractJson(String raw) {
@@ -250,15 +208,6 @@ public class AiPlanService {
         } catch (Exception e) {
             log.debug("写入 AI 计划缓存失败: {}", e.getMessage());
         }
-    }
-
-    private List<String> planProviderOrder(String preferredProvider) {
-        LinkedHashSet<String> ordered = new LinkedHashSet<>();
-        if (preferredProvider != null && !preferredProvider.isBlank()) {
-            ordered.add(preferredProvider.trim());
-        }
-        ordered.addAll(oneApiProperties.getChatOrder());
-        return new ArrayList<>(ordered);
     }
 
     @SuppressWarnings("unchecked")
