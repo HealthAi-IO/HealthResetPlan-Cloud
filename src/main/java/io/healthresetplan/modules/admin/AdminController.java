@@ -51,17 +51,17 @@ public class AdminController {
         data.put("stats", mapOf(
                 "totalUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL"),
                 "todayNewUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL AND created_at >= ?", today),
-                "activeMembers", count("SELECT COUNT(DISTINCT user_id) FROM user_subscription WHERE status = 'active' AND expires_at > NOW(3)"),
+                "activeMembers", 0,
                 "cloudSyncUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL AND has_cloud_sync = 1"),
                 "healthIndicators", healthIndicators,
                 "reports", reports,
-                "paidOrders", count("SELECT COUNT(*) FROM payment_order WHERE status = 'paid'"),
-                "revenueYuan", moneyYuan(sumFen("SELECT COALESCE(SUM(amount_fen), 0) FROM payment_order WHERE status = 'paid'"))
+                "paidOrders", 0,
+                "revenueYuan", "0.00"
         ));
-        data.put("trend", sevenDayTrend());
+        data.put("trend", List.of());
         data.put("indicatorTypes", indicatorTypes(null));
         data.put("recentUsers", recentUsers(8));
-        data.put("recentOrders", recentOrders(8));
+        data.put("recentOrders", List.of());
         return R.ok(data);
     }
 
@@ -147,16 +147,6 @@ public class AdminController {
                   ) agg_source
                   GROUP BY agg_source.user_id
                 ),
-                subscription_stats AS (
-                  SELECT
-                    sub.user_id,
-                    COUNT(*) AS active_subscription_count,
-                    MAX(sub.expires_at) AS member_expires_at
-                  FROM user_subscription sub
-                  JOIN page_users pu ON pu.user_id = sub.user_id
-                  WHERE sub.status = 'active' AND sub.expires_at > NOW(3)
-                  GROUP BY sub.user_id
-                )
                 SELECT
                   pu.user_id,
                   pu.custom_id,
@@ -171,14 +161,13 @@ public class AdminController {
                   ls.last_login_at,
                   COALESCE(ins.indicator_count, 0) AS indicator_count,
                   COALESCE(rs.report_count, 0) AS report_count,
-                  COALESCE(ss.active_subscription_count, 0) AS active_subscription_count,
-                  ss.member_expires_at
+                   0 AS active_subscription_count,
+                   NULL AS member_expires_at
                 FROM page_users pu
                 LEFT JOIN login_stats ls ON ls.user_id = pu.user_id
                 LEFT JOIN indicator_stats ins ON ins.user_id = pu.user_id
                 LEFT JOIN report_stats rs ON rs.user_id = pu.user_id
-                LEFT JOIN subscription_stats ss ON ss.user_id = pu.user_id
-                ORDER BY pu.created_at DESC
+                 ORDER BY pu.created_at DESC
                 """;
 
         List<Map<String, Object>> rows = jdbc.queryForList(sql, listArgs).stream()
@@ -211,8 +200,8 @@ public class AdminController {
                    + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_indicator' AND sr.deleted_at IS NULL)) AS indicator_count,
                   ((SELECT COUNT(*) FROM health_report hr WHERE hr.user_id = ua.user_id AND hr.deleted_at IS NULL)
                    + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_report' AND sr.deleted_at IS NULL)) AS report_count,
-                  (SELECT COUNT(*) FROM user_subscription sub WHERE sub.user_id = ua.user_id AND sub.status = 'active' AND sub.expires_at > NOW(3)) AS active_subscription_count,
-                  (SELECT MAX(sub.expires_at) FROM user_subscription sub WHERE sub.user_id = ua.user_id AND sub.status = 'active') AS member_expires_at
+                   0 AS active_subscription_count,
+                   NULL AS member_expires_at
                 FROM user_account ua
                 WHERE ua.deleted_at IS NULL AND ua.user_id = ?
                 """, userId);
@@ -223,13 +212,7 @@ public class AdminController {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("profile", userRow(rows.get(0)));
         detail.put("indicatorTypes", indicatorTypes(userId));
-        detail.put("subscriptions", jdbc.queryForList("""
-                SELECT plan_code, status, starts_at, expires_at, payment_channel, payment_order_no, created_at
-                FROM user_subscription
-                WHERE user_id = ?
-                ORDER BY created_at DESC
-                LIMIT 20
-                """, userId));
+        detail.put("subscriptions", List.of());
         detail.put("sessions", jdbc.queryForList("""
                 SELECT device_id, ip, user_agent, expires_at, created_at
                 FROM user_session
@@ -238,414 +221,6 @@ public class AdminController {
                 LIMIT 20
                 """, userId));
         return R.ok(detail);
-    }
-
-    @GetMapping("/vip/summary")
-    public R<Map<String, Object>> vipSummary() {
-        LocalDate start = LocalDate.now().minusDays(6);
-        long activeMembers = count("SELECT COUNT(DISTINCT user_id) FROM user_subscription WHERE status = 'active' AND expires_at > NOW(3)");
-        long totalUsers = count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL");
-        long paidUsers = count("SELECT COUNT(DISTINCT user_id) FROM payment_order WHERE status = 'paid'");
-        long sevenDayNewMembers = count("""
-                SELECT COUNT(DISTINCT user_id)
-                FROM user_subscription
-                WHERE created_at >= ?
-                """, start.atStartOfDay());
-        long sevenDayRevenueFen = sumFen("""
-                SELECT COALESCE(SUM(amount_fen), 0)
-                FROM payment_order
-                WHERE status = 'paid'
-                  AND created_at >= ?
-                """, start.atStartOfDay());
-
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("stats", mapOf(
-                "activeMembers", activeMembers,
-                "expiringSoon", count("""
-                        SELECT COUNT(DISTINCT user_id)
-                        FROM user_subscription
-                        WHERE status = 'active'
-                          AND expires_at > NOW(3)
-                          AND expires_at <= DATE_ADD(NOW(3), INTERVAL 7 DAY)
-                        """),
-                "expiredMembers", count("""
-                        SELECT COUNT(DISTINCT user_id)
-                        FROM user_subscription
-                        WHERE expires_at <= NOW(3)
-                        """),
-                "freeUsers", Math.max(0, totalUsers - activeMembers),
-                "monthlyMembers", count("""
-                        SELECT COUNT(DISTINCT user_id)
-                        FROM user_subscription
-                        WHERE status = 'active'
-                          AND expires_at > NOW(3)
-                          AND plan_code = 'monthly'
-                        """),
-                "yearlyMembers", count("""
-                        SELECT COUNT(DISTINCT user_id)
-                        FROM user_subscription
-                        WHERE status = 'active'
-                          AND expires_at > NOW(3)
-                          AND plan_code = 'yearly'
-                        """),
-                "totalRevenueYuan", moneyYuan(sumFen("SELECT COALESCE(SUM(amount_fen), 0) FROM payment_order WHERE status = 'paid'")),
-                "todayRevenueYuan", moneyYuan(sumFen("""
-                        SELECT COALESCE(SUM(amount_fen), 0)
-                        FROM payment_order
-                        WHERE status = 'paid'
-                          AND created_at >= ?
-                        """, LocalDate.now().atStartOfDay())),
-                "paidUsers", paidUsers,
-                "memberConversionRate", percent(activeMembers, totalUsers),
-                "paidConversionRate", percent(paidUsers, totalUsers),
-                "sevenDayNewMembers", sevenDayNewMembers,
-                "sevenDayRevenueYuan", moneyYuan(sevenDayRevenueFen)
-        ));
-        data.put("dailyRevenue", revenueTrend(start));
-        data.put("memberTrend", memberTrend(start));
-        data.put("planBreakdown", jdbc.queryForList("""
-                SELECT
-                  mp.code AS planCode,
-                  mp.name AS planName,
-                  COUNT(DISTINCT CASE
-                    WHEN us.status = 'active' AND us.expires_at > NOW(3) THEN us.user_id
-                    ELSE NULL
-                  END) AS activeMembers,
-                  COUNT(DISTINCT us.user_id) AS totalMembers,
-                  COALESCE(SUM(CASE
-                    WHEN po.status = 'paid' THEN po.amount_fen
-                    ELSE 0
-                  END), 0) AS revenueFen
-                FROM membership_plan mp
-                LEFT JOIN user_subscription us ON us.plan_code = mp.code
-                LEFT JOIN payment_order po ON po.plan_code = mp.code
-                GROUP BY mp.code, mp.name, mp.sort_order
-                ORDER BY mp.sort_order ASC, mp.code ASC
-                """).stream().map(row -> {
-            Map<String, Object> out = new LinkedHashMap<>(row);
-            out.put("activeMembers", number(row.get("activeMembers")));
-            out.put("totalMembers", number(row.get("totalMembers")));
-            out.put("revenueYuan", moneyYuan(number(row.get("revenueFen"))));
-            return out;
-        }).toList());
-        return R.ok(data);
-    }
-
-    @GetMapping("/vip/users")
-    public R<Map<String, Object>> vipUsers(
-            @RequestParam(value = "keyword", required = false) String keyword,
-            @RequestParam(value = "membershipStatus", required = false) String membershipStatus,
-            @RequestParam(value = "page", defaultValue = "1") int page,
-            @RequestParam(value = "pageSize", defaultValue = "20") int pageSize) {
-        int safePage = Math.max(page, 1);
-        int safeSize = Math.min(Math.max(pageSize, 1), 100);
-        int offset = (safePage - 1) * safeSize;
-        String like = keyword == null || keyword.isBlank() ? null : "%" + keyword.trim() + "%";
-        String status = membershipStatus == null ? "" : membershipStatus.trim().toLowerCase();
-
-        StringBuilder where = new StringBuilder(" WHERE ua.deleted_at IS NULL ");
-        List<Object> params = new ArrayList<>();
-        if (like != null) {
-            where.append(" AND (ua.nickname LIKE ? OR ua.phone_tail LIKE ? OR ua.custom_id LIKE ?) ");
-            params.add(like);
-            params.add(like);
-            params.add(like);
-        }
-
-        switch (status) {
-            case "active" -> where.append("""
-                     AND EXISTS (
-                       SELECT 1 FROM user_subscription sub
-                       WHERE sub.user_id = ua.user_id
-                         AND sub.status = 'active'
-                         AND sub.expires_at > NOW(3)
-                     )
-                    """);
-            case "expiring" -> where.append("""
-                     AND EXISTS (
-                       SELECT 1 FROM user_subscription sub
-                       WHERE sub.user_id = ua.user_id
-                         AND sub.status = 'active'
-                         AND sub.expires_at > NOW(3)
-                         AND sub.expires_at <= DATE_ADD(NOW(3), INTERVAL 7 DAY)
-                     )
-                    """);
-            case "expired" -> where.append("""
-                     AND NOT EXISTS (
-                       SELECT 1 FROM user_subscription sub
-                       WHERE sub.user_id = ua.user_id
-                         AND sub.status = 'active'
-                         AND sub.expires_at > NOW(3)
-                     )
-                     AND EXISTS (
-                       SELECT 1 FROM user_subscription sub
-                       WHERE sub.user_id = ua.user_id
-                         AND sub.expires_at <= NOW(3)
-                     )
-                    """);
-            case "free" -> where.append("""
-                     AND NOT EXISTS (
-                       SELECT 1 FROM user_subscription sub
-                       WHERE sub.user_id = ua.user_id
-                     )
-                    """);
-            default -> {
-            }
-        }
-
-        Long total = queryLong("SELECT COUNT(*) FROM user_account ua" + where, params.toArray());
-
-        String sql = """
-                SELECT
-                  ua.user_id,
-                  ua.custom_id,
-                  ua.phone_tail,
-                  ua.nickname,
-                  ua.avatar_url,
-                  ua.status,
-                  ua.role_code,
-                  ua.has_cloud_sync,
-                  ua.created_at,
-                  (
-                    SELECT sub.plan_code
-                    FROM user_subscription sub
-                    WHERE sub.user_id = ua.user_id
-                    ORDER BY sub.expires_at DESC
-                    LIMIT 1
-                  ) AS latest_plan_code,
-                  (
-                    SELECT mp.name
-                    FROM membership_plan mp
-                    WHERE mp.code = (
-                      SELECT sub.plan_code
-                      FROM user_subscription sub
-                      WHERE sub.user_id = ua.user_id
-                      ORDER BY sub.expires_at DESC
-                      LIMIT 1
-                    )
-                  ) AS latest_plan_name,
-                  (
-                    SELECT sub.status
-                    FROM user_subscription sub
-                    WHERE sub.user_id = ua.user_id
-                    ORDER BY sub.expires_at DESC
-                    LIMIT 1
-                  ) AS latest_subscription_status,
-                  (
-                    SELECT sub.expires_at
-                    FROM user_subscription sub
-                    WHERE sub.user_id = ua.user_id
-                    ORDER BY sub.expires_at DESC
-                    LIMIT 1
-                  ) AS member_expires_at,
-                  (
-                    SELECT sub.payment_channel
-                    FROM user_subscription sub
-                    WHERE sub.user_id = ua.user_id
-                    ORDER BY sub.expires_at DESC
-                    LIMIT 1
-                  ) AS latest_payment_channel,
-                  (
-                    SELECT sub.payment_order_no
-                    FROM user_subscription sub
-                    WHERE sub.user_id = ua.user_id
-                    ORDER BY sub.expires_at DESC
-                    LIMIT 1
-                  ) AS latest_payment_order_no,
-                  (
-                    SELECT COUNT(*)
-                    FROM user_subscription sub
-                    WHERE sub.user_id = ua.user_id
-                      AND sub.status = 'active'
-                      AND sub.expires_at > NOW(3)
-                  ) AS active_subscription_count
-                FROM user_account ua
-                """ + where + """
-                ORDER BY
-                  CASE
-                    WHEN (
-                      SELECT COUNT(*)
-                      FROM user_subscription sub
-                      WHERE sub.user_id = ua.user_id
-                        AND sub.status = 'active'
-                        AND sub.expires_at > NOW(3)
-                    ) > 0 THEN 0
-                    ELSE 1
-                  END,
-                  member_expires_at ASC,
-                  ua.created_at DESC
-                LIMIT ? OFFSET ?
-                """;
-
-        List<Object> listArgs = new ArrayList<>(params);
-        listArgs.add(safeSize);
-        listArgs.add(offset);
-        List<Map<String, Object>> rows = jdbc.queryForList(sql, listArgs.toArray()).stream()
-                .map(this::vipUserRow)
-                .toList();
-        return R.ok(Map.of(
-                "items", rows,
-                "total", total != null ? total : 0,
-                "page", safePage,
-                "pageSize", safeSize
-        ));
-    }
-
-    @GetMapping("/orders/summary")
-    public R<Map<String, Object>> orderSummary() {
-        LocalDate today = LocalDate.now();
-        LocalDate start = today.minusDays(6);
-        long paidOrders = count("SELECT COUNT(*) FROM payment_order WHERE status = 'paid'");
-        long totalPaidFen = sumFen("SELECT COALESCE(SUM(amount_fen), 0) FROM payment_order WHERE status = 'paid'");
-        long totalOrders = count("SELECT COUNT(*) FROM payment_order");
-        long pendingOrders = count("SELECT COUNT(*) FROM payment_order WHERE status = 'pending'");
-
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("stats", mapOf(
-                "todayRevenueYuan", moneyYuan(sumFen("""
-                        SELECT COALESCE(SUM(amount_fen), 0)
-                        FROM payment_order
-                        WHERE status = 'paid'
-                          AND created_at >= ?
-                        """, today.atStartOfDay())),
-                "todayPaidOrders", count("""
-                        SELECT COUNT(*)
-                        FROM payment_order
-                        WHERE status = 'paid'
-                          AND created_at >= ?
-                        """, today.atStartOfDay()),
-                "todayPaidUsers", count("""
-                        SELECT COUNT(DISTINCT user_id)
-                        FROM payment_order
-                        WHERE status = 'paid'
-                          AND created_at >= ?
-                        """, today.atStartOfDay()),
-                "totalRevenueYuan", moneyYuan(totalPaidFen),
-                "refundAmountYuan", moneyYuan(sumFen("SELECT COALESCE(SUM(amount_fen), 0) FROM payment_order WHERE status = 'refunded'")),
-                "pendingOrders", pendingOrders,
-                "paidOrders", paidOrders,
-                "totalOrders", totalOrders,
-                "averageOrderValueYuan", paidOrders > 0 ? moneyYuan(totalPaidFen / paidOrders) : "0.00",
-                "paymentSuccessRate", percent(paidOrders, Math.max(totalOrders - pendingOrders, 0)),
-                "pendingOrderRate", percent(pendingOrders, totalOrders),
-                "sevenDayRevenueYuan", moneyYuan(sumFen("""
-                        SELECT COALESCE(SUM(amount_fen), 0)
-                        FROM payment_order
-                        WHERE status = 'paid'
-                          AND created_at >= ?
-                        """, start.atStartOfDay()))
-        ));
-        data.put("dailyRevenue", revenueTrend(start));
-        data.put("channelBreakdown", jdbc.queryForList("""
-                SELECT
-                  channel,
-                  COUNT(*) AS paidOrders,
-                  COALESCE(SUM(amount_fen), 0) AS revenueFen
-                FROM payment_order
-                WHERE status = 'paid'
-                GROUP BY channel
-                ORDER BY revenueFen DESC, paidOrders DESC
-                """).stream().map(row -> {
-            Map<String, Object> out = new LinkedHashMap<>(row);
-            out.put("paidOrders", number(row.get("paidOrders")));
-            out.put("revenueYuan", moneyYuan(number(row.get("revenueFen"))));
-            return out;
-        }).toList());
-        data.put("planBreakdown", jdbc.queryForList("""
-                SELECT
-                  o.plan_code AS planCode,
-                  COALESCE(mp.name, o.plan_code) AS planName,
-                  COUNT(*) AS paidOrders,
-                  COALESCE(SUM(o.amount_fen), 0) AS revenueFen
-                FROM payment_order o
-                LEFT JOIN membership_plan mp ON mp.code = o.plan_code
-                WHERE o.status = 'paid'
-                GROUP BY o.plan_code, mp.name
-                ORDER BY revenueFen DESC, paidOrders DESC
-                """).stream().map(row -> {
-            Map<String, Object> out = new LinkedHashMap<>(row);
-            out.put("paidOrders", number(row.get("paidOrders")));
-            out.put("revenueYuan", moneyYuan(number(row.get("revenueFen"))));
-            return out;
-        }).toList());
-        data.put("recentPaidOrders", recentOrders(8));
-        return R.ok(data);
-    }
-
-    @GetMapping("/orders")
-    public R<Map<String, Object>> orders(
-            @RequestParam(value = "keyword", required = false) String keyword,
-            @RequestParam(value = "status", required = false) String status,
-            @RequestParam(value = "channel", required = false) String channel,
-            @RequestParam(value = "planCode", required = false) String planCode,
-            @RequestParam(value = "page", defaultValue = "1") int page,
-            @RequestParam(value = "pageSize", defaultValue = "20") int pageSize) {
-        int safePage = Math.max(page, 1);
-        int safeSize = Math.min(Math.max(pageSize, 1), 100);
-        int offset = (safePage - 1) * safeSize;
-        String like = keyword == null || keyword.isBlank() ? null : "%" + keyword.trim() + "%";
-
-        StringBuilder where = new StringBuilder(" WHERE 1 = 1 ");
-        List<Object> params = new ArrayList<>();
-        if (like != null) {
-            where.append(" AND (o.order_no LIKE ? OR ua.nickname LIKE ? OR ua.phone_tail LIKE ?) ");
-            params.add(like);
-            params.add(like);
-            params.add(like);
-        }
-        if (status != null && !status.isBlank()) {
-            where.append(" AND o.status = ? ");
-            params.add(status.trim());
-        }
-        if (channel != null && !channel.isBlank()) {
-            where.append(" AND o.channel = ? ");
-            params.add(channel.trim());
-        }
-        if (planCode != null && !planCode.isBlank()) {
-            where.append(" AND o.plan_code = ? ");
-            params.add(planCode.trim());
-        }
-
-        String countSql = """
-                SELECT COUNT(*)
-                FROM payment_order o
-                LEFT JOIN user_account ua ON ua.user_id = o.user_id
-                """ + where;
-        Long total = queryLong(countSql, params.toArray());
-
-        String sql = """
-                SELECT
-                  o.order_no,
-                  o.user_id,
-                  o.plan_code,
-                  o.amount_fen,
-                  o.channel,
-                  o.channel_order_no,
-                  o.status,
-                  o.paid_at,
-                  o.created_at,
-                  ua.nickname,
-                  ua.phone_tail,
-                  mp.name AS plan_name
-                FROM payment_order o
-                LEFT JOIN user_account ua ON ua.user_id = o.user_id
-                LEFT JOIN membership_plan mp ON mp.code = o.plan_code
-                """ + where + """
-                ORDER BY o.created_at DESC
-                LIMIT ? OFFSET ?
-                """;
-        List<Object> listArgs = new ArrayList<>(params);
-        listArgs.add(safeSize);
-        listArgs.add(offset);
-        List<Map<String, Object>> rows = jdbc.queryForList(sql, listArgs.toArray()).stream()
-                .map(this::orderRow)
-                .toList();
-        return R.ok(Map.of(
-                "items", rows,
-                "total", total != null ? total : 0,
-                "page", safePage,
-                "pageSize", safeSize
-        ));
     }
 
     @GetMapping("/system/summary")
@@ -1788,131 +1363,6 @@ public class AdminController {
         return R.ok(data);
     }
 
-    private List<Map<String, Object>> sevenDayTrend() {
-        LocalDate start = LocalDate.now().minusDays(6);
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT d.day,
-                       COALESCE(u.users, 0) AS users,
-                       COALESCE(h.indicators, 0) AS indicators,
-                       COALESCE(o.orders, 0) AS orders
-                FROM (
-                  SELECT CURDATE() - INTERVAL 6 DAY AS day UNION ALL
-                  SELECT CURDATE() - INTERVAL 5 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 4 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 3 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 2 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 1 DAY UNION ALL
-                  SELECT CURDATE()
-                ) d
-                LEFT JOIN (
-                  SELECT DATE(created_at) AS day, COUNT(*) AS users
-                  FROM user_account
-                  WHERE deleted_at IS NULL AND created_at >= ?
-                  GROUP BY DATE(created_at)
-                ) u ON u.day = d.day
-                LEFT JOIN (
-                  SELECT day, SUM(indicators) AS indicators
-                  FROM (
-                    SELECT DATE(created_at) AS day, COUNT(*) AS indicators
-                    FROM health_indicator
-                    WHERE deleted_at IS NULL AND created_at >= ?
-                    GROUP BY DATE(created_at)
-                    UNION ALL
-                    SELECT DATE(created_at) AS day, COUNT(*) AS indicators
-                    FROM sync_record
-                    WHERE table_name = 'health_indicator'
-                      AND deleted_at IS NULL
-                      AND created_at >= ?
-                    GROUP BY DATE(created_at)
-                  ) hAll
-                  GROUP BY day
-                ) h ON h.day = d.day
-                LEFT JOIN (
-                  SELECT DATE(created_at) AS day, COUNT(*) AS orders
-                  FROM payment_order
-                  WHERE status = 'paid' AND created_at >= ?
-                  GROUP BY DATE(created_at)
-                ) o ON o.day = d.day
-                ORDER BY d.day ASC
-                """, start, start, start, start);
-        return rows.stream().map(row -> {
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("day", String.valueOf(row.get("day")));
-            out.put("users", number(row.get("users")));
-            out.put("indicators", number(row.get("indicators")));
-            out.put("orders", number(row.get("orders")));
-            return out;
-        }).toList();
-    }
-
-    private List<Map<String, Object>> revenueTrend(LocalDate start) {
-        return jdbc.queryForList("""
-                SELECT d.day,
-                       COALESCE(o.paid_orders, 0) AS paid_orders,
-                       COALESCE(o.revenue_fen, 0) AS revenue_fen
-                FROM (
-                  SELECT CURDATE() - INTERVAL 6 DAY AS day UNION ALL
-                  SELECT CURDATE() - INTERVAL 5 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 4 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 3 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 2 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 1 DAY UNION ALL
-                  SELECT CURDATE()
-                ) d
-                LEFT JOIN (
-                  SELECT DATE(created_at) AS day,
-                         COUNT(*) AS paid_orders,
-                         COALESCE(SUM(amount_fen), 0) AS revenue_fen
-                  FROM payment_order
-                  WHERE status = 'paid'
-                    AND created_at >= ?
-                  GROUP BY DATE(created_at)
-                ) o ON o.day = d.day
-                ORDER BY d.day ASC
-                """, start).stream().map(row -> {
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("day", String.valueOf(row.get("day")));
-            out.put("paidOrders", number(row.get("paid_orders")));
-            out.put("revenueYuan", moneyYuan(number(row.get("revenue_fen"))));
-            return out;
-        }).toList();
-    }
-
-    private List<Map<String, Object>> memberTrend(LocalDate start) {
-        return jdbc.queryForList("""
-                SELECT d.day,
-                       COALESCE(s.new_members, 0) AS new_members,
-                       COALESCE(s.active_members, 0) AS active_members
-                FROM (
-                  SELECT CURDATE() - INTERVAL 6 DAY AS day UNION ALL
-                  SELECT CURDATE() - INTERVAL 5 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 4 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 3 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 2 DAY UNION ALL
-                  SELECT CURDATE() - INTERVAL 1 DAY UNION ALL
-                  SELECT CURDATE()
-                ) d
-                LEFT JOIN (
-                  SELECT DATE(created_at) AS day,
-                         COUNT(DISTINCT user_id) AS new_members,
-                         COUNT(DISTINCT CASE
-                           WHEN status = 'active' AND expires_at > NOW(3) THEN user_id
-                           ELSE NULL
-                         END) AS active_members
-                  FROM user_subscription
-                  WHERE created_at >= ?
-                  GROUP BY DATE(created_at)
-                ) s ON s.day = d.day
-                ORDER BY d.day ASC
-                """, start).stream().map(row -> {
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("day", String.valueOf(row.get("day")));
-            out.put("newMembers", number(row.get("new_members")));
-            out.put("activeMembers", number(row.get("active_members")));
-            return out;
-        }).toList();
-    }
-
     private List<Map<String, Object>> indicatorTypes(String userId) {
         if (userId == null || userId.isBlank()) {
             return jdbc.queryForList("""
@@ -1977,58 +1427,6 @@ public class AdminController {
                 ORDER BY created_at DESC
                 LIMIT ?
                 """, limit).stream().map(this::userRow).toList();
-    }
-
-    private List<Map<String, Object>> recentOrders(int limit) {
-        return jdbc.queryForList("""
-                SELECT order_no, user_id, plan_code, amount_fen, channel, status, paid_at, created_at
-                FROM payment_order
-                ORDER BY created_at DESC
-                LIMIT ?
-                """, limit).stream().map(row -> {
-            Map<String, Object> out = new LinkedHashMap<>(row);
-            out.put("amountYuan", moneyYuan(number(row.get("amount_fen"))));
-            return out;
-        }).toList();
-    }
-
-    private Map<String, Object> vipUserRow(Map<String, Object> row) {
-        Map<String, Object> out = userRow(row);
-        String latestPlanCode = stringValue(row.get("latest_plan_code"));
-        String latestPlanName = stringValue(row.get("latest_plan_name"));
-        long activeSubscriptions = number(row.get("active_subscription_count"));
-        String latestStatus = stringValue(row.get("latest_subscription_status"));
-        String membershipStatus = "free";
-        String membershipStatusText = "免费用户";
-
-        if (activeSubscriptions > 0) {
-            membershipStatus = "active";
-            membershipStatusText = "活跃会员";
-            if (isWithinDays(row.get("member_expires_at"), 7)) {
-                membershipStatus = "expiring";
-                membershipStatusText = "即将到期";
-            }
-        } else if (!latestStatus.isBlank() || row.get("member_expires_at") != null) {
-            membershipStatus = "expired";
-            membershipStatusText = "已过期";
-        }
-
-        out.put("latestPlanCode", latestPlanCode);
-        out.put("latestPlanName", latestPlanName.isBlank() ? latestPlanCode : latestPlanName);
-        out.put("membershipStatus", membershipStatus);
-        out.put("membershipStatusText", membershipStatusText);
-        out.put("latestPaymentChannel", stringValue(row.get("latest_payment_channel")));
-        out.put("latestPaymentOrderNo", stringValue(row.get("latest_payment_order_no")));
-        return out;
-    }
-
-    private Map<String, Object> orderRow(Map<String, Object> row) {
-        Map<String, Object> out = new LinkedHashMap<>(row);
-        String maskedTail = maskPhoneTail(stringValue(row.get("phone_tail")));
-        out.put("account", accountDisplay(maskedTail, stringValue(row.get("nickname"))));
-        out.put("amountYuan", moneyYuan(number(row.get("amount_fen"))));
-        out.put("planName", stringValue(row.get("plan_name")).isBlank() ? stringValue(row.get("plan_code")) : stringValue(row.get("plan_name")));
-        return out;
     }
 
     private Map<String, Object> platformSessionRow(Map<String, Object> row) {

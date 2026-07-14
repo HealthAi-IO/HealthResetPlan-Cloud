@@ -6,6 +6,7 @@ import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
@@ -27,10 +28,12 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final ObjectMapper objectMapper;
+    private final Environment environment;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter, ObjectMapper objectMapper) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter, ObjectMapper objectMapper, Environment environment) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.objectMapper = objectMapper;
+        this.environment = environment;
     }
 
     @Bean
@@ -50,12 +53,9 @@ public class SecurityConfig {
                                 "/api/v1/admin/system/admins/**",
                                 "/api/v1/admin/system/roles"
                         ).hasRole("SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/vip/**", "/api/v1/admin/orders/**").denyAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/users/**")
                         .hasAnyAuthority("PERM_user:read", "PERM_*")
-                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/vip/**")
-                        .hasAnyAuthority("PERM_vip:read", "PERM_*")
-                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/orders/**")
-                        .hasAnyAuthority("PERM_order:read", "PERM_*")
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/platforms/**")
                         .hasAnyAuthority("PERM_platform:read", "PERM_*")
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/releases/**")
@@ -82,7 +82,6 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/v1/auth/**",
                                 "/api/v1/releases/check",
-                                "/api/v1/membership/callback/**",  // 支付回调由网关签名保障
                                 "/api/v1/files/avatar/**",         // 头像公开可读
                                 "/api/v1/health",
                                 "/v3/api-docs/**",
@@ -131,16 +130,16 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of(
+        List<String> origins = new java.util.ArrayList<>(List.of(
                 "https://admin.jkcqplan.com",
                 "https://app.jkcqplan.com",
                 "https://jkcqplan.com",
                 "https://www.jkcqplan.com",
-                "https://api.jkcqplan.com",
-                "http://localhost:*",
-                "http://127.0.0.1:*",
-                "http://192.168.*.*:*"
-        ));
+                "https://api.jkcqplan.com"));
+        if (!java.util.Arrays.asList(environment.getActiveProfiles()).contains("prod")) {
+            origins.addAll(List.of("http://localhost:*", "http://127.0.0.1:*", "http://192.168.*.*:*"));
+        }
+        config.setAllowedOriginPatterns(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization"));

@@ -2,6 +2,7 @@ package io.healthresetplan.modules.auth;
 
 import io.healthresetplan.common.result.R;
 import io.healthresetplan.modules.auth.dto.LoginRequest;
+import io.healthresetplan.modules.auth.dto.AccountRecoveryRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
 import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
@@ -64,6 +65,16 @@ public class AuthController {
         String userId = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         authService.cancelAccount(userId);
         return R.ok();
+    }
+
+    @PostMapping("/account-recovery/reactivate")
+    public R<TokenResponse> reactivateAccount(@Valid @RequestBody AccountRecoveryRequest req, HttpServletRequest httpReq) {
+        return R.ok(authService.reactivateAccount(req, httpReq));
+    }
+
+    @PostMapping("/account-recovery/send-code")
+    public R<PasswordResetCodeResponse> sendAccountRecoveryCode(@RequestBody java.util.Map<String, String> body) {
+        return R.ok(authService.sendAccountRecoveryCode(body.get("phone")));
     }
 
     @PostMapping("/password-reset/send-code")

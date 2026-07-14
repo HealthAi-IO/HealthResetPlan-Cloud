@@ -27,7 +27,7 @@ public class ReportController {
      */
     @PostMapping("/analyze")
     public R<AnalyzeResponse> analyze(@RequestParam("file") MultipartFile file) {
-        return R.ok(reportService.analyze(file));
+        return R.ok(reportService.analyze(file, currentUserId()));
     }
 
     /**

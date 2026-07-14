@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.common.util.HashUtils;
+import io.healthresetplan.modules.ai.AiUsageLimiter;
+import io.healthresetplan.modules.ai.MedicalRiskGuard;
 import io.healthresetplan.modules.ai.oneapi.OneApiProperties;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import io.healthresetplan.modules.membership.MembershipService;
@@ -65,20 +67,27 @@ public class AiPlanService {
     private final MembershipService membershipService;
     private final OneApiProperties oneApiProperties;
     private final StringRedisTemplate redisTemplate;
+    private final AiUsageLimiter usageLimiter;
 
     public AiPlanService(OneApiService oneApiService,
                          MembershipService membershipService,
                          OneApiProperties oneApiProperties,
-                         StringRedisTemplate redisTemplate) {
+                         StringRedisTemplate redisTemplate,
+                         AiUsageLimiter usageLimiter) {
         this.oneApiService = oneApiService;
         this.membershipService = membershipService;
         this.oneApiProperties = oneApiProperties;
         this.redisTemplate = redisTemplate;
+        this.usageLimiter = usageLimiter;
     }
 
     public AiPlanResponse generate(String userId, AiPlanRequest req) {
         if (!membershipService.hasFeature(userId, "cloud_sync")) {
             throw new BusinessException(40301, "AI 方案生成是会员专属功能，请先开通会员");
+        }
+        String safetyReply = MedicalRiskGuard.safetyReply(buildUserMessage(req));
+        if (safetyReply != null) {
+            throw new BusinessException(42201, safetyReply);
         }
 
         List<ChatCompletionMessageParam> messages = List.of(
@@ -95,6 +104,8 @@ public class AiPlanService {
             log.info("AI 计划命中缓存 userId={}", userId);
             return new AiPlanResponse(preferredProvider != null ? preferredProvider : "auto", cachedJson, 0, 0);
         }
+
+        usageLimiter.consume(userId, AiUsageLimiter.Type.PLAN);
 
         long maxCompletionTokens = Math.max(1200L, oneApiProperties.getPlanMaxCompletionTokens());
         OneApiService.AiCompletion completion = oneApiService.completeWithProvider(

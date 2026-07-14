@@ -2,6 +2,8 @@ package io.healthresetplan.modules.ai.chat;
 
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.modules.ai.AiUsageLimiter;
+import io.healthresetplan.modules.ai.MedicalRiskGuard;
 import io.healthresetplan.modules.ai.oneapi.OneApiProperties;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import io.healthresetplan.modules.membership.MembershipService;
@@ -30,19 +32,27 @@ public class AiChatService {
     private final OneApiService oneApiService;
     private final OneApiProperties props;
     private final MembershipService membershipService;
+    private final AiUsageLimiter usageLimiter;
 
     public AiChatService(OneApiService oneApiService,
                          OneApiProperties props,
-                         MembershipService membershipService) {
+                         MembershipService membershipService,
+                         AiUsageLimiter usageLimiter) {
         this.oneApiService = oneApiService;
         this.props = props;
         this.membershipService = membershipService;
+        this.usageLimiter = usageLimiter;
     }
 
     // ── 非流式 ──────────────────────────────────────────────────
 
     public AiChatResponse chat(String userId, AiChatRequest req) {
         checkMembership(userId);
+        String safetyReply = MedicalRiskGuard.safetyReply(requestText(req));
+        if (safetyReply != null) {
+            return new AiChatResponse("safety", safetyReply, 0, 0);
+        }
+        usageLimiter.consume(userId, AiUsageLimiter.Type.CHAT);
         List<ChatCompletionMessageParam> msgs = buildMessages(req);
         String content = oneApiService.complete(userId, msgs, req.provider());
         return new AiChatResponse(
@@ -60,6 +70,13 @@ public class AiChatService {
                            Consumer<String> tokenConsumer,
                            Runnable onDone) {
         checkMembership(userId);
+        String safetyReply = MedicalRiskGuard.safetyReply(requestText(req));
+        if (safetyReply != null) {
+            tokenConsumer.accept(safetyReply);
+            onDone.run();
+            return;
+        }
+        usageLimiter.consume(userId, AiUsageLimiter.Type.CHAT);
         List<ChatCompletionMessageParam> msgs = buildMessages(req);
         StringBuilder content = new StringBuilder();
         oneApiService.stream(userId, msgs, req.provider(), token -> {
@@ -77,11 +94,11 @@ public class AiChatService {
     // ── 配额查询 ─────────────────────────────────────────────────
 
     public long getDailyCount(String userId) {
-        return oneApiService.getDailyCount(userId);
+        return usageLimiter.used(userId, AiUsageLimiter.Type.CHAT);
     }
 
     public int getDailyLimit() {
-        return props.getDailyLimit();
+        return usageLimiter.limit(AiUsageLimiter.Type.CHAT);
     }
 
     // ── 内部工具 ─────────────────────────────────────────────────
@@ -102,6 +119,15 @@ public class AiChatService {
     private boolean hasAiDoctorDisclaimer(String content) {
         return content != null
                 && (content.contains("不能代替医生") || content.contains("不代替医生"));
+    }
+
+    private String requestText(AiChatRequest req) {
+        if (req.messages() == null) return req.profileSummary();
+        StringBuilder text = new StringBuilder(req.profileSummary() == null ? "" : req.profileSummary());
+        for (AiChatRequest.ChatMessage message : req.messages()) {
+            if (message.content() != null) text.append(' ').append(message.content());
+        }
+        return text.toString();
     }
 
     private List<ChatCompletionMessageParam> buildMessages(AiChatRequest req) {

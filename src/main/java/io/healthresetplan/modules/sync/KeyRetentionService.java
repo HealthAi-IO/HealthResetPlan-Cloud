@@ -6,6 +6,8 @@ import io.healthresetplan.modules.sync.entity.HealthIndicator;
 import io.healthresetplan.modules.sync.entity.SyncRecord;
 import io.healthresetplan.modules.sync.mapper.HealthIndicatorMapper;
 import io.healthresetplan.modules.sync.mapper.SyncRecordMapper;
+import io.healthresetplan.modules.report.entity.HealthReport;
+import io.healthresetplan.modules.report.mapper.HealthReportMapper;
 import io.healthresetplan.modules.user.entity.UserKeyMeta;
 import io.healthresetplan.modules.user.mapper.UserKeyMetaMapper;
 import org.slf4j.Logger;
@@ -21,19 +23,22 @@ import java.util.List;
 public class KeyRetentionService {
 
     private static final Logger log = LoggerFactory.getLogger(KeyRetentionService.class);
-    private static final int RETENTION_DAYS = 90;
+    private static final int RETENTION_DAYS = 30;
 
     private final UserKeyMetaMapper keyMetaMapper;
     private final SyncRecordMapper syncRecordMapper;
     private final HealthIndicatorMapper healthIndicatorMapper;
+    private final HealthReportMapper healthReportMapper;
 
     public KeyRetentionService(
             UserKeyMetaMapper keyMetaMapper,
             SyncRecordMapper syncRecordMapper,
-            HealthIndicatorMapper healthIndicatorMapper) {
+            HealthIndicatorMapper healthIndicatorMapper,
+            HealthReportMapper healthReportMapper) {
         this.keyMetaMapper = keyMetaMapper;
         this.syncRecordMapper = syncRecordMapper;
         this.healthIndicatorMapper = healthIndicatorMapper;
+        this.healthReportMapper = healthReportMapper;
     }
 
     @Transactional
@@ -171,6 +176,10 @@ public class KeyRetentionService {
             healthIndicatorMapper.delete(new LambdaQueryWrapper<HealthIndicator>()
                     .eq(HealthIndicator::getUserId, meta.getUserId()));
         }
+        healthIndicatorMapper.delete(new LambdaQueryWrapper<HealthIndicator>()
+                .eq(HealthIndicator::getUserId, meta.getUserId()));
+        healthReportMapper.delete(new LambdaQueryWrapper<HealthReport>()
+                .eq(HealthReport::getUserId, meta.getUserId()));
 
         meta.setPurgeStatus("purged");
         meta.setPurgedAt(now);
@@ -178,4 +187,5 @@ public class KeyRetentionService {
         keyMetaMapper.updateById(meta);
         log.info("已清理过期云端密文 userId={} keyFingerprint={}", meta.getUserId(), fingerprint);
     }
+
 }

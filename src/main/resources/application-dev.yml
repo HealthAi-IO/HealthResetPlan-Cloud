@@ -42,14 +42,6 @@ app:
       endpoint: ${JDCLOUD_SMS_ENDPOINT:sms.jdcloud-api.com}
       connect-timeout-millis: ${JDCLOUD_SMS_CONNECT_TIMEOUT_MILLIS:3000}
       read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
-  payment:
-    alipay:
-      enabled: ${ALIPAY_ENABLED:false}
-      app-id: ${ALIPAY_APP_ID:}
-      private-key: ${ALIPAY_PRIVATE_KEY:}
-      alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
-      notify-url: ${ALIPAY_NOTIFY_URL:https://api.jkcqplan.com/api/v1/membership/callback/alipay}
-      gateway-url: ${ALIPAY_GATEWAY_URL:https://openapi.alipay.com/gateway.do}
   ai:
     # 对话/计划生成厂商优先级：依次尝试，失败自动降级
     chat-order: [qwen, doubao, deepseek]

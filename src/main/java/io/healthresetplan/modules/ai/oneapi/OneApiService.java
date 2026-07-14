@@ -124,7 +124,6 @@ public class OneApiService {
             List<ChatCompletionMessageParam> messages,
             String preferredProvider,
             long maxCompletionTokens) {
-        checkAndIncrementDailyLimit(userId);
 
         for (String providerName : providerOrder(preferredProvider)) {
             OpenAIClient client = clients.get(providerName);
@@ -172,7 +171,6 @@ public class OneApiService {
             String preferredProvider,
             Consumer<String> tokenConsumer,
             Runnable onDone) {
-        checkAndIncrementDailyLimit(userId);
 
         for (String providerName : providerOrder(preferredProvider)) {
             OpenAIClient client = clients.get(providerName);
@@ -210,7 +208,6 @@ public class OneApiService {
 
     public String analyzeImage(String userId, String imageBase64, String mimeType, String prompt) {
         long startedAt = System.currentTimeMillis();
-        if (userId != null) checkAndIncrementDailyLimit(userId);
 
         String providerName = props.getVisionProvider();
         OpenAIClient client = clients.get(providerName);
@@ -309,30 +306,6 @@ public class OneApiService {
                 com.openai.models.chat.completions.ChatCompletionAssistantMessageParam.builder()
                         .content(content)
                         .build());
-    }
-
-    private void checkAndIncrementDailyLimit(String userId) {
-        if (userId == null || userId.isBlank()) return;
-
-        LocalDate today = LocalDate.now();
-        if (!today.equals(counterDate)) {
-            dailyCounters.clear();
-            counterDate = today;
-        }
-
-        AtomicLong counter = dailyCounters.computeIfAbsent(userId, ignored -> new AtomicLong(0));
-        if (counter.get() >= props.getDailyLimit()) {
-            throw new BusinessException(42901,
-                    "今日 AI 请求次数已达上限（" + props.getDailyLimit() + " 次），请明日再试");
-        }
-        counter.incrementAndGet();
-    }
-
-    public long getDailyCount(String userId) {
-        LocalDate today = LocalDate.now();
-        if (!today.equals(counterDate)) return 0;
-        AtomicLong counter = dailyCounters.get(userId);
-        return counter == null ? 0 : counter.get();
     }
 
     private List<String> providerOrder(String preferredProvider) {

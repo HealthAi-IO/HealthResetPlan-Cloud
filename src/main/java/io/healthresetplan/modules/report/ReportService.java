@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.modules.ai.AiUsageLimiter;
+import io.healthresetplan.modules.ai.MedicalRiskGuard;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import io.healthresetplan.modules.report.dto.AnalyzeResponse;
 import io.healthresetplan.modules.report.dto.ReportSaveRequest;
@@ -84,13 +86,16 @@ public class ReportService {
 
     private final HealthReportMapper reportMapper;
     private final OneApiService oneApiService;
+    private final AiUsageLimiter usageLimiter;
 
-    public ReportService(HealthReportMapper reportMapper, OneApiService oneApiService) {
+    public ReportService(HealthReportMapper reportMapper, OneApiService oneApiService,
+                         AiUsageLimiter usageLimiter) {
         this.reportMapper = reportMapper;
         this.oneApiService = oneApiService;
+        this.usageLimiter = usageLimiter;
     }
 
-    public AnalyzeResponse analyze(MultipartFile file) {
+    public AnalyzeResponse analyze(MultipartFile file, String userId) {
         long startedAt = System.currentTimeMillis();
         if (file == null || file.isEmpty()) {
             throw new BusinessException(40001, "图片不能为空");
@@ -113,7 +118,8 @@ public class ReportService {
         }
 
         String base64 = Base64.getEncoder().encodeToString(bytes);
-        String rawJson = oneApiService.analyzeImage(null, base64, mimeType, OCR_FAST_PROMPT);
+        usageLimiter.consume(userId, AiUsageLimiter.Type.REPORT);
+        String rawJson = oneApiService.analyzeImage(userId, base64, mimeType, OCR_FAST_PROMPT);
         log.info("Report OCR finished elapsedMs={} rawLength={}",
                 System.currentTimeMillis() - startedAt,
                 rawJson == null ? 0 : rawJson.length());
@@ -208,7 +214,28 @@ public class ReportService {
             advice = advice.trim() + " AI 不能代替医生诊断，只提供健康管理建议；如有异常结果、不适症状或用药调整需求，请及时咨询医生。";
         }
         response.setAnalysisAdvice(advice);
+        String riskText = String.join(" ", nullToEmpty(response.getRawText()), nullToEmpty(response.getSummary()), advice);
+        if (MedicalRiskGuard.safetyReply(riskText) != null || hasCriticalIndicator(response)) {
+            response.setHighRisk(true);
+            response.setRiskMessage("报告存在需要优先就医核实的风险信息，请尽快联系医疗机构；AI 不提供治疗、用药或剂量建议。");
+            response.setAnalysisAdvice(response.getRiskMessage());
+        }
         return response;
+    }
+
+    private boolean hasCriticalIndicator(AnalyzeResponse response) {
+        for (AnalyzeResponse.Indicator item : response.getIndicators()) {
+            String text = (nullToEmpty(item.getName()) + " " + nullToEmpty(item.getValue())).toLowerCase();
+            double value = firstNumber(item.getValue());
+            if ((text.contains("血压") && value >= 180) || (text.contains("血糖") && (value >= 16.7 || value <= 3.0))) return true;
+        }
+        return false;
+    }
+
+    private double firstNumber(String value) {
+        if (value == null) return Double.NaN;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("-?\\\\d+(?:\\\\.\\\\d+)?").matcher(value);
+        return matcher.find() ? Double.parseDouble(matcher.group()) : Double.NaN;
     }
 
     private void fillFields(HealthReport report, ReportSaveRequest req) {

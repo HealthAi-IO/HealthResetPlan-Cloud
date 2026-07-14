@@ -27,7 +27,8 @@ public class BackendSyncService {
             "plan",
             "clock_record",
             "reminder",
-            "health_report"
+            "health_report",
+            "meal_record"
     );
 
     private final SyncRecordMapper syncRecordMapper;
@@ -128,18 +129,21 @@ public class BackendSyncService {
         }
     }
 
-    public List<SyncPullItem> pull(String userId, String keyFingerprint, long sinceMs, int limit) {
+    public PullPage pull(String userId, String keyFingerprint, long sinceMs, long untilMs, int offset, int limit) {
         var normalizedFingerprint = normalizeFingerprint(keyFingerprint);
         keyRetentionService.markUsed(userId, normalizedFingerprint);
         var since = sinceMs > 0
                 ? fromEpochMilli(sinceMs)
                 : LocalDateTime.of(2000, 1, 1, 0, 0);
+        var until = fromEpochMilli(untilMs);
 
         var cappedLimit = Math.min(limit, 500);
+        var safeOffset = Math.max(offset, 0);
+        var fetchLimit = Math.min(safeOffset + cappedLimit + 1, 10_001);
         var items = new ArrayList<SyncPullItem>();
 
         syncRecordMapper
-                .selectByUserSinceAndKey(userId, normalizedFingerprint, since, cappedLimit)
+                .selectByUserBetweenAndKey(userId, normalizedFingerprint, since, until, fetchLimit)
                 .stream()
                 .map(record -> new SyncPullItem(
                         record.getTableName(),
@@ -161,7 +165,7 @@ public class BackendSyncService {
         // old health_indicator rows encrypted only payload_json. New clients
         // detect that format and rebuild a local health_indicator row.
         healthIndicatorMapper
-                .selectByUserSince(userId, since, cappedLimit)
+                .selectByUserBetween(userId, since, until, fetchLimit)
                 .stream()
                 .map(record -> new SyncPullItem(
                         "health_indicator",
@@ -179,11 +183,15 @@ public class BackendSyncService {
                 ))
                 .forEach(items::add);
 
-        return items.stream()
+        var ordered = items.stream()
                 .sorted(Comparator.comparingLong(SyncPullItem::clientUpdatedAt))
-                .limit(cappedLimit)
                 .toList();
+        if (safeOffset >= ordered.size()) return new PullPage(List.of(), false);
+        int end = Math.min(safeOffset + cappedLimit, ordered.size());
+        return new PullPage(ordered.subList(safeOffset, end), end < ordered.size());
     }
+
+    public record PullPage(List<SyncPullItem> items, boolean hasMore) {}
 
     private String normalizeFingerprint(String keyFingerprint) {
         return keyFingerprint == null ? "" : keyFingerprint.trim();

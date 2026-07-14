@@ -10,6 +10,7 @@ import io.healthresetplan.modules.auth.dto.LoginRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
 import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
+import io.healthresetplan.modules.auth.dto.AccountRecoveryRequest;
 import io.healthresetplan.modules.auth.dto.RefreshRequest;
 import io.healthresetplan.modules.auth.dto.RegisterRequest;
 import io.healthresetplan.modules.auth.dto.SmsLoginCodeRequest;
@@ -22,7 +23,9 @@ import io.healthresetplan.modules.user.entity.UserCredential;
 import io.healthresetplan.modules.user.entity.UserSession;
 import io.healthresetplan.modules.user.mapper.UserAccountMapper;
 import io.healthresetplan.modules.user.mapper.UserCredentialMapper;
+import io.healthresetplan.modules.user.mapper.UserKeyMetaMapper;
 import io.healthresetplan.modules.user.mapper.UserSessionMapper;
+import io.healthresetplan.modules.user.entity.UserKeyMeta;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -40,6 +43,7 @@ public class AuthService {
     private final UserAccountMapper accountMapper;
     private final UserCredentialMapper credentialMapper;
     private final UserSessionMapper sessionMapper;
+    private final UserKeyMetaMapper keyMetaMapper;
     private final KeyRetentionService keyRetentionService;
     private final JwtUtils jwtUtils;
     private final JwtProperties jwtProperties;
@@ -48,6 +52,7 @@ public class AuthService {
     public AuthService(UserAccountMapper accountMapper,
                        UserCredentialMapper credentialMapper,
                        UserSessionMapper sessionMapper,
+                       UserKeyMetaMapper keyMetaMapper,
                        KeyRetentionService keyRetentionService,
                        JwtUtils jwtUtils,
                        JwtProperties jwtProperties,
@@ -55,6 +60,7 @@ public class AuthService {
         this.accountMapper = accountMapper;
         this.credentialMapper = credentialMapper;
         this.sessionMapper = sessionMapper;
+        this.keyMetaMapper = keyMetaMapper;
         this.keyRetentionService = keyRetentionService;
         this.jwtUtils = jwtUtils;
         this.jwtProperties = jwtProperties;
@@ -215,6 +221,42 @@ public class AuthService {
         keyRetentionService.startRetentionForAccount(userId);
     }
 
+    @Transactional
+    public TokenResponse reactivateAccount(AccountRecoveryRequest req, HttpServletRequest httpReq) {
+        String phone = normalizeIdentifier("phone", req.getPhone());
+        smsVerificationService.verifyPhoneCode(
+                SmsVerificationService.SCENE_ACCOUNT_RECOVERY, phone, req.getCode());
+
+        UserCredential credential = findCredential("phone", phone);
+        if (credential == null) {
+            throw new BusinessException(40401, "账号不存在");
+        }
+        UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
+                .eq(UserAccount::getUserId, credential.getUserId()));
+        if (account == null || account.getStatus() == null || account.getStatus() != -1) {
+            throw new BusinessException(40003, "该账号不在可恢复状态");
+        }
+
+        UserKeyMeta key = keyMetaMapper.selectOne(new LambdaQueryWrapper<UserKeyMeta>()
+                .eq(UserKeyMeta::getUserId, account.getUserId())
+                .eq(UserKeyMeta::getPublicFinger, req.getKeyFingerprint().toLowerCase())
+                .eq(UserKeyMeta::getPurgeStatus, "retaining")
+                .gt(UserKeyMeta::getRetentionUntil, LocalDateTime.now())
+                .last("LIMIT 1"));
+        if (key == null) {
+            throw new BusinessException(40301, "助记词不匹配或数据保留期已结束");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        accountMapper.update(null, new LambdaUpdateWrapper<UserAccount>()
+                .eq(UserAccount::getUserId, account.getUserId())
+                .set(UserAccount::getStatus, 1)
+                .set(UserAccount::getHasCloudSync, 1)
+                .set(UserAccount::getUpdatedAt, now));
+        keyRetentionService.markUsed(account.getUserId(), req.getKeyFingerprint().toLowerCase());
+        return buildTokensAndSession(account.getUserId(), httpReq);
+    }
+
     public PasswordResetCodeResponse sendPasswordResetCode(PasswordResetCodeRequest req) {
         String credType = normalizeCredType(req.getCredType());
         String identifier = normalizeIdentifier(credType, req.getIdentifier());
@@ -230,6 +272,17 @@ public class AuthService {
                 SmsVerificationService.SCENE_PASSWORD_RESET,
                 identifier
         );
+        return new PasswordResetCodeResponse(result.debugCode(), result.expiresIn());
+    }
+
+    public PasswordResetCodeResponse sendAccountRecoveryCode(String phone) {
+        String normalizedPhone = normalizeIdentifier("phone", phone);
+        UserCredential credential = findCredential("phone", normalizedPhone);
+        if (credential == null) {
+            throw new BusinessException(40401, "账号不存在");
+        }
+        SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
+                SmsVerificationService.SCENE_ACCOUNT_RECOVERY, normalizedPhone);
         return new PasswordResetCodeResponse(result.debugCode(), result.expiresIn());
     }
 

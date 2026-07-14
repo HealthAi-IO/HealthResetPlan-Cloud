@@ -2,6 +2,7 @@ package io.healthresetplan.modules.ai.chat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.result.R;
+import io.healthresetplan.modules.ai.AiUsageLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.task.TaskExecutor;
@@ -20,11 +21,13 @@ public class AiChatController {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final AiChatService chatService;
+    private final AiUsageLimiter usageLimiter;
     private final TaskExecutor taskExecutor;
 
-    public AiChatController(AiChatService chatService, TaskExecutor taskExecutor) {
+    public AiChatController(AiChatService chatService, TaskExecutor taskExecutor, AiUsageLimiter usageLimiter) {
         this.chatService = chatService;
         this.taskExecutor = taskExecutor;
+        this.usageLimiter = usageLimiter;
     }
 
     /** 非流式对话（兼容旧客户端） */
@@ -106,7 +109,11 @@ public class AiChatController {
         String userId = currentUserId();
         long used = chatService.getDailyCount(userId);
         int limit = chatService.getDailyLimit();
-        return R.ok(Map.of("used", used, "limit", limit, "remaining", Math.max(0, limit - used)));
+        Map<String, Object> result = new java.util.LinkedHashMap<>(usageLimiter.usage(userId));
+        result.put("used", used);
+        result.put("limit", limit);
+        result.put("remaining", Math.max(0, limit - used));
+        return R.ok(result);
     }
 
     private String currentUserId() {

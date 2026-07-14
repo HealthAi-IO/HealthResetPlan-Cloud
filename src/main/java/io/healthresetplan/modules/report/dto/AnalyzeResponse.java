@@ -11,6 +11,8 @@ public class AnalyzeResponse {
     private String rawText;
     private String provider;
     private String model;
+    private boolean highRisk;
+    private String riskMessage;
 
     public static class Indicator {
         private String category;
@@ -59,4 +61,10 @@ public class AnalyzeResponse {
 
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
+
+    public boolean isHighRisk() { return highRisk; }
+    public void setHighRisk(boolean highRisk) { this.highRisk = highRisk; }
+
+    public String getRiskMessage() { return riskMessage; }
+    public void setRiskMessage(String riskMessage) { this.riskMessage = riskMessage; }
 }

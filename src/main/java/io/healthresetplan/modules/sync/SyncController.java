@@ -23,7 +23,6 @@ public class SyncController {
 
     private final MembershipService membershipService;
     private final BackendSyncService syncService;
-
     public SyncController(MembershipService membershipService, BackendSyncService syncService) {
         this.membershipService = membershipService;
         this.syncService = syncService;
@@ -43,20 +42,29 @@ public class SyncController {
     public R<Map<String, Object>> pull(
             @RequestHeader(value = "X-Key-Fingerprint", required = false) String keyFingerprint,
             @RequestParam(value = "since", required = false) Long sinceMs,
+            @RequestParam(value = "until", required = false) Long untilMs,
+            @RequestParam(value = "offset", defaultValue = "0") int offset,
             @RequestParam(value = "limit", defaultValue = "200") int limit) {
         String userId = requireCloudSync();
-        List<SyncPullItem> items = syncService.pull(userId, keyFingerprint, sinceMs != null ? sinceMs : 0L, limit);
+        long serverTime = untilMs != null ? untilMs : Instant.now().toEpochMilli();
+        BackendSyncService.PullPage page = syncService.pull(
+                userId, keyFingerprint, sinceMs != null ? sinceMs : 0L, serverTime, offset, limit);
         return R.ok(Map.of(
-                "items", items,
-                "serverTime", Instant.now().toEpochMilli()
+                "items", page.items(),
+                "hasMore", page.hasMore(),
+                "serverTime", serverTime
         ));
     }
 
     private String requireCloudSync() {
-        String userId = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        String userId = currentUserId();
         if (!membershipService.hasCloudSync(userId)) {
             throw new BusinessException(40301, "云同步功能需要开通会员，免费版数据仅保存在本地设备");
         }
         return userId;
+    }
+
+    private String currentUserId() {
+        return (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
     }
 }
