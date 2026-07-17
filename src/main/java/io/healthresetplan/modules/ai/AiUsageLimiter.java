@@ -17,9 +17,10 @@ public class AiUsageLimiter {
     private static final ZoneId CHINA_ZONE = ZoneId.of("Asia/Shanghai");
 
     public enum Type {
-        CHAT("chat", 30),
+        CHAT("chat", 66),
         PLAN("plan", 3),
-        REPORT("report", 5);
+        REPORT("report", 5),
+        IMAGE("image", 5);
 
         private final String key;
         private final int limit;
@@ -45,6 +46,14 @@ public class AiUsageLimiter {
         if (used != null && used > type.limit) {
             redis.opsForValue().decrement(key);
             throw new BusinessException(42901, "今日" + label(type) + "次数已达上限（" + type.limit + " 次）");
+        }
+    }
+
+    public void release(String userId, Type type) {
+        String key = key(userId, type);
+        Long used = redis.opsForValue().decrement(key);
+        if (used != null && used <= 0) {
+            redis.delete(key);
         }
     }
 
@@ -74,6 +83,7 @@ public class AiUsageLimiter {
             case CHAT -> "AI 对话";
             case PLAN -> "计划生成";
             case REPORT -> "报告识别";
+            case IMAGE -> "图片分析";
         };
     }
 }

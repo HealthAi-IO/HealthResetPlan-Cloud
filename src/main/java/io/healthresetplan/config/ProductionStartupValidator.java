@@ -25,7 +25,7 @@ public class ProductionStartupValidator implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         require(jwt.getSecret(), "JWT_SECRET", 32);
         require(System.getenv("FILES_STORAGE_PATH"), "FILES_STORAGE_PATH", 1);
-        if (sms.isDebugCodeEnabled() || !sms.isJdcloudReady()) {
+        if (!sms.isDebugCodeEnabled() && !sms.isJdcloudReady()) {
             throw new IllegalStateException("生产环境必须关闭短信调试验证码并配置短信服务");
         }
         boolean aiReady = ai.getProviders().values().stream()

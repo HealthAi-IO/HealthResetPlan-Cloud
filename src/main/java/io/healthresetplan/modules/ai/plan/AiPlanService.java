@@ -82,6 +82,7 @@ public class AiPlanService {
     }
 
     public AiPlanResponse generate(String userId, AiPlanRequest req) {
+        validateProfile(req);
         if (!membershipService.hasFeature(userId, "cloud_sync")) {
             throw new BusinessException(40301, "AI 方案生成是会员专属功能，请先开通会员");
         }
@@ -98,33 +99,38 @@ public class AiPlanService {
         String preferredProvider = req.provider() != null && !req.provider().isBlank()
                 ? req.provider()
                 : null;
-        String cacheKey = cacheKey(userId, req, preferredProvider);
-        String cachedJson = readCachedPlan(cacheKey);
-        if (cachedJson != null) {
-            log.info("AI 计划命中缓存 userId={}", userId);
-            return new AiPlanResponse(preferredProvider != null ? preferredProvider : "auto", cachedJson, 0, 0);
-        }
-
         usageLimiter.consume(userId, AiUsageLimiter.Type.PLAN);
-
-        long maxCompletionTokens = Math.max(1200L, oneApiProperties.getPlanMaxCompletionTokens());
-        OneApiService.AiCompletion completion = oneApiService.completeWithProvider(
-                userId,
-                messages,
-                preferredProvider,
-                maxCompletionTokens);
-        String rawJson = extractJson(completion.content());
-        if (!isUsablePlan(rawJson)) {
-            log.warn("AI plan JSON invalid userId={} provider={}", userId, completion.provider());
-            throw new BusinessException(50301, "AI 方案格式异常，请重试或切换模型");
+        try {
+            long maxCompletionTokens = Math.max(1200L, oneApiProperties.getPlanMaxCompletionTokens());
+            OneApiService.AiCompletion completion = oneApiService.completeWithProvider(
+                    userId,
+                    messages,
+                    preferredProvider,
+                    maxCompletionTokens);
+            String rawJson = extractJson(completion.content());
+            if (!isUsablePlan(rawJson)) {
+                log.warn("AI plan JSON invalid userId={} provider={}", userId, completion.provider());
+                throw new BusinessException(50301, "AI 方案格式异常，请重试或切换模型");
+            }
+            log.info("AI 计划生成成功 provider={}", completion.provider());
+            return new AiPlanResponse(completion.provider(), rawJson, 0, 0);
+        } catch (RuntimeException e) {
+            usageLimiter.release(userId, AiUsageLimiter.Type.PLAN);
+            throw e;
         }
-        cachePlan(cacheKey, rawJson);
-
-        log.info("AI 计划生成成功 userId={} provider={}", userId, completion.provider());
-        return new AiPlanResponse(completion.provider(), rawJson, 0, 0);
     }
 
     // ── 内部 ─────────────────────────────────────────────────────
+
+    private void validateProfile(AiPlanRequest req) {
+        if (req.age() < 14 || req.age() > 120
+                || !List.of("male", "female").contains(req.gender())
+                || req.heightCm() < 80 || req.heightCm() > 250
+                || req.weightKg() < 20 || req.weightKg() > 400
+                || req.goal() == null || req.goal().isBlank()) {
+            throw new BusinessException(40001, "请先完善性别、出生年份、身高、体重和健康目标，再生成个性化 AI 计划");
+        }
+    }
 
     private String buildUserMessage(AiPlanRequest req) {
         String gender = "male".equals(req.gender()) ? "男" : "女";

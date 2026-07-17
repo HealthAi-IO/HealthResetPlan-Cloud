@@ -54,8 +54,13 @@ public class SecurityConfig {
                                 "/api/v1/admin/system/roles"
                         ).hasRole("SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/vip/**", "/api/v1/admin/orders/**").denyAll()
+                        .requestMatchers("/api/v1/admin/feedback/**").denyAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/users/**")
                         .hasAnyAuthority("PERM_user:read", "PERM_*")
+                        .requestMatchers("/api/v1/admin/analytics/**")
+                        .hasAnyAuthority("PERM_analytics:read", "PERM_analytics:export", "PERM_*")
+                        .requestMatchers("/api/v1/admin/exports/**")
+                        .hasAnyAuthority("PERM_user:export", "PERM_analytics:export", "PERM_feedback:export", "PERM_*")
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/platforms/**")
                         .hasAnyAuthority("PERM_platform:read", "PERM_*")
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/releases/**")

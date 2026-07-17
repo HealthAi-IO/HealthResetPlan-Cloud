@@ -119,11 +119,16 @@ public class ReportService {
 
         String base64 = Base64.getEncoder().encodeToString(bytes);
         usageLimiter.consume(userId, AiUsageLimiter.Type.REPORT);
-        String rawJson = oneApiService.analyzeImage(userId, base64, mimeType, OCR_FAST_PROMPT);
-        log.info("Report OCR finished elapsedMs={} rawLength={}",
-                System.currentTimeMillis() - startedAt,
-                rawJson == null ? 0 : rawJson.length());
-        return parseAnalyzeResult(rawJson, oneApiService.visionProviderLabel());
+        try {
+            String rawJson = oneApiService.analyzeImage(userId, base64, mimeType, OCR_FAST_PROMPT);
+            log.info("Report OCR finished elapsedMs={} rawLength={}",
+                    System.currentTimeMillis() - startedAt,
+                    rawJson == null ? 0 : rawJson.length());
+            return parseAnalyzeResult(rawJson, oneApiService.visionProviderLabel());
+        } catch (RuntimeException e) {
+            usageLimiter.release(userId, AiUsageLimiter.Type.REPORT);
+            throw e;
+        }
     }
 
     @Transactional

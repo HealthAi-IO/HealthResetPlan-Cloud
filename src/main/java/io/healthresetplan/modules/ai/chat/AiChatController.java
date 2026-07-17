@@ -23,17 +23,21 @@ public class AiChatController {
     private final AiChatService chatService;
     private final AiUsageLimiter usageLimiter;
     private final TaskExecutor taskExecutor;
+    private final io.healthresetplan.modules.ai.AiConsentService consentService;
 
-    public AiChatController(AiChatService chatService, TaskExecutor taskExecutor, AiUsageLimiter usageLimiter) {
+    public AiChatController(AiChatService chatService, TaskExecutor taskExecutor, AiUsageLimiter usageLimiter,
+                            io.healthresetplan.modules.ai.AiConsentService consentService) {
         this.chatService = chatService;
         this.taskExecutor = taskExecutor;
         this.usageLimiter = usageLimiter;
+        this.consentService = consentService;
     }
 
     /** 非流式对话（兼容旧客户端） */
     @PostMapping
     public R<AiChatResponse> chat(@RequestBody AiChatRequest req) {
         String userId = currentUserId();
+        consentService.requireActive(userId);
         return R.ok(chatService.chat(userId, req));
     }
 
@@ -55,6 +59,7 @@ public class AiChatController {
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chatStream(@RequestBody AiChatRequest req) {
         String userId = currentUserId();
+        consentService.requireActive(userId);
         // 90 秒超时，与 OneAPI 请求超时对齐
         SseEmitter emitter = new SseEmitter(180_000L);
 

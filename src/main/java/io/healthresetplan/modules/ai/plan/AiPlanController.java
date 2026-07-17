@@ -10,9 +10,11 @@ import org.springframework.web.bind.annotation.*;
 public class AiPlanController {
 
     private final AiPlanService planService;
+    private final io.healthresetplan.modules.ai.AiConsentService consentService;
 
-    public AiPlanController(AiPlanService planService) {
+    public AiPlanController(AiPlanService planService, io.healthresetplan.modules.ai.AiConsentService consentService) {
         this.planService = planService;
+        this.consentService = consentService;
     }
 
     /**
@@ -24,6 +26,7 @@ public class AiPlanController {
     public R<AiPlanResponse> generate(@Valid @RequestBody AiPlanRequest req) {
         String userId = (String) SecurityContextHolder.getContext()
                 .getAuthentication().getPrincipal();
+        consentService.requireActive(userId);
         return R.ok(planService.generate(userId, req));
     }
 }

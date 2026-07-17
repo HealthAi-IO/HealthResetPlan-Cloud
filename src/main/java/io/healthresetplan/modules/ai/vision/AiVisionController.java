@@ -16,9 +16,11 @@ import java.util.Map;
 public class AiVisionController {
 
     private final AiVisionService service;
+    private final io.healthresetplan.modules.ai.AiConsentService consentService;
 
-    public AiVisionController(AiVisionService service) {
+    public AiVisionController(AiVisionService service, io.healthresetplan.modules.ai.AiConsentService consentService) {
         this.service = service;
+        this.consentService = consentService;
     }
 
     @PostMapping("/analyze")
@@ -28,6 +30,7 @@ public class AiVisionController {
         String userId = (String) SecurityContextHolder.getContext()
                 .getAuthentication()
                 .getPrincipal();
+        consentService.requireActive(userId);
         return R.ok(service.analyze(userId, file, type));
     }
 }

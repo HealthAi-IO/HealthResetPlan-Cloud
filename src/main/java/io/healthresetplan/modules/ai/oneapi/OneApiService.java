@@ -125,6 +125,7 @@ public class OneApiService {
             String preferredProvider,
             long maxCompletionTokens) {
 
+        boolean rateLimited = false;
         for (String providerName : providerOrder(preferredProvider)) {
             OpenAIClient client = clients.get(providerName);
             if (client == null) continue;
@@ -139,19 +140,21 @@ public class OneApiService {
                                 .build());
 
                 String content = response.choices().get(0).message().content().orElse("");
-                log.info("AI complete ok provider={} model={} userId={}", providerName, model, userId);
+                log.info("AI complete ok provider={} model={}", providerName, model);
                 return new AiCompletion(providerName, content);
             } catch (RateLimitException e) {
-                log.warn("AI rate limited provider={}", providerName);
-                throw new BusinessException(42901,
-                        "今日 AI 请求次数已达上限（" + props.getDailyLimit() + " 次），请明日再试");
+                log.warn("AI provider rate limited provider={}", providerName);
+                rateLimited = true;
             } catch (UnauthorizedException e) {
                 log.error("AI key unauthorized provider={}", providerName);
             } catch (Exception e) {
-                log.warn("AI provider={} unavailable, trying next: {}", providerName, e.getMessage());
+                log.warn("AI provider={} unavailable, trying next", providerName);
             }
         }
 
+        if (rateLimited) {
+            throw new BusinessException(42902, "AI 服务暂时繁忙，请稍后再试");
+        }
         throw new BusinessException(50301, "所有 AI 厂商暂时不可用，请稍后重试");
     }
 
@@ -172,6 +175,7 @@ public class OneApiService {
             Consumer<String> tokenConsumer,
             Runnable onDone) {
 
+        boolean rateLimited = false;
         for (String providerName : providerOrder(preferredProvider)) {
             OpenAIClient client = clients.get(providerName);
             if (client == null) continue;
@@ -187,22 +191,24 @@ public class OneApiService {
                     streamResponse.stream().forEach(chunk -> extractToken(chunk).forEach(tokenConsumer));
                 }
 
-                log.info("AI stream done provider={} userId={}", providerName, userId);
+                log.info("AI stream done provider={}", providerName);
                 onDone.run();
                 return;
             } catch (RateLimitException e) {
-                log.warn("AI stream rate limited provider={}", providerName);
-                throw new BusinessException(42901,
-                        "今日 AI 请求次数已达上限（" + props.getDailyLimit() + " 次），请明日再试");
+                log.warn("AI stream provider rate limited provider={}", providerName);
+                rateLimited = true;
             } catch (UnauthorizedException e) {
                 log.error("AI stream key unauthorized provider={}", providerName);
             } catch (BusinessException e) {
                 throw e;
             } catch (Exception e) {
-                log.warn("AI stream provider={} unavailable, trying next: {}", providerName, e.getMessage());
+                log.warn("AI stream provider={} unavailable, trying next", providerName);
             }
         }
 
+        if (rateLimited) {
+            throw new BusinessException(42902, "AI 服务暂时繁忙，请稍后再试");
+        }
         throw new BusinessException(50301, "所有 AI 厂商暂时不可用，请稍后重试");
     }
 
@@ -243,16 +249,13 @@ public class OneApiService {
                             .build());
 
             String content = response.choices().get(0).message().content().orElse("");
-            log.info("OCR complete provider={} model={} userId={} elapsedMs={} imageBase64Chars={} outputChars={}",
+            log.info("OCR complete provider={} model={} elapsedMs={}",
                     providerName,
                     model,
-                    userId,
-                    System.currentTimeMillis() - startedAt,
-                    imageBase64 == null ? 0 : imageBase64.length(),
-                    content.length());
+                    System.currentTimeMillis() - startedAt);
             return content;
         } catch (RateLimitException e) {
-            throw new BusinessException(42901, "今日 AI 请求次数已达上限，请明日再试");
+            throw new BusinessException(42902, "AI 服务暂时繁忙，请稍后再试");
         } catch (UnauthorizedException e) {
             throw new BusinessException(40101, "视觉模型 Key 无效：" + providerName);
         } catch (UnexpectedStatusCodeException e) {

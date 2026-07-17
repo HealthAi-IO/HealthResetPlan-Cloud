@@ -131,6 +131,9 @@ public class AuthService {
     public PasswordResetCodeResponse sendSmsLoginCode(SmsLoginCodeRequest req) {
         String phone = normalizePhone(req.getPhone());
         validatePhone(phone);
+        if (findCredential("phone", phone) == null) {
+            throw new BusinessException(40401, "账号不存在，请先注册");
+        }
         SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
                 SmsVerificationService.SCENE_AUTH,
                 phone
@@ -149,20 +152,18 @@ public class AuthService {
                 .eq(UserCredential::getCredType, "phone")
                 .eq(UserCredential::getIdentifierHash, identifierHash));
 
-        String userId;
         if (credential == null) {
-            userId = createPhoneAccount(phone, req.getNickname());
-        } else {
-            UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
-                    .eq(UserAccount::getUserId, credential.getUserId()));
-            if (account == null || account.getStatus() != 1) {
-                throw new BusinessException(40301, "account disabled");
-            }
-            backfillPhoneTail(account, "phone", phone);
-            userId = credential.getUserId();
+            throw new BusinessException(40401, "账号不存在，请先注册");
         }
 
-        return buildTokensAndSession(userId, httpReq);
+        UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
+                .eq(UserAccount::getUserId, credential.getUserId()));
+        if (account == null || account.getStatus() != 1) {
+            throw new BusinessException(40301, "账号已被禁用或注销");
+        }
+        backfillPhoneTail(account, "phone", phone);
+
+        return buildTokensAndSession(credential.getUserId(), httpReq);
     }
 
     @Transactional

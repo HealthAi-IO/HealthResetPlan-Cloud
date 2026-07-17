@@ -51,17 +51,71 @@ public class AdminController {
         data.put("stats", mapOf(
                 "totalUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL"),
                 "todayNewUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL AND created_at >= ?", today),
-                "activeMembers", 0,
                 "cloudSyncUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL AND has_cloud_sync = 1"),
                 "healthIndicators", healthIndicators,
-                "reports", reports,
-                "paidOrders", 0,
-                "revenueYuan", "0.00"
+                "reports", reports
         ));
-        data.put("trend", List.of());
+        data.put("trend", jdbc.queryForList("""
+                SELECT days.day,
+                       COALESCE(registrations.users, 0) AS users,
+                       COALESCE(activity.active_users, 0) AS activeUsers,
+                       COALESCE(activity.event_count, 0) AS eventCount
+                FROM (
+                  SELECT DATE_SUB(CURDATE(), INTERVAL seq DAY) AS day
+                  FROM (SELECT 0 AS seq UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3
+                        UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6) offsets
+                ) days
+                LEFT JOIN (
+                  SELECT DATE(created_at) AS day, COUNT(*) AS users
+                  FROM user_account
+                  WHERE deleted_at IS NULL AND created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                  GROUP BY DATE(created_at)
+                ) registrations ON registrations.day = days.day
+                LEFT JOIN (
+                  SELECT DATE(created_at) AS day, COUNT(DISTINCT user_id) AS active_users, COUNT(*) AS event_count
+                  FROM client_event
+                  WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                  GROUP BY DATE(created_at)
+                ) activity ON activity.day = days.day
+                ORDER BY days.day
+                """));
         data.put("indicatorTypes", indicatorTypes(null));
         data.put("recentUsers", recentUsers(8));
-        data.put("recentOrders", List.of());
+        return R.ok(data);
+    }
+
+    @GetMapping("/analytics/overview")
+    public R<Map<String, Object>> analyticsOverview(
+            @RequestParam(value = "days", defaultValue = "30") int days) {
+        int safeDays = Math.min(Math.max(days, 7), 90);
+        LocalDateTime from = LocalDate.now().minusDays(safeDays - 1L).atStartOfDay();
+        LocalDateTime today = LocalDate.now().atStartOfDay();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("stats", Map.of(
+                "dailyActive", count("SELECT COUNT(DISTINCT user_id) FROM client_event WHERE created_at >= ?", today),
+                "weeklyActive", count("SELECT COUNT(DISTINCT user_id) FROM client_event WHERE created_at >= ?", today.minusDays(6)),
+                "monthlyActive", count("SELECT COUNT(DISTINCT user_id) FROM client_event WHERE created_at >= ?", today.minusDays(29)),
+                "dayOneRetention", retention(today.minusDays(1), today),
+                "daySevenRetention", retention(today.minusDays(7), today),
+                "dayThirtyRetention", retention(today.minusDays(30), today)
+        ));
+        data.put("features", jdbc.queryForList("""
+                SELECT event_type AS eventType, COUNT(DISTINCT user_id) AS userCount, COUNT(*) AS eventCount,
+                       ROUND(COUNT(*) / NULLIF(COUNT(DISTINCT user_id), 0), 1) AS averageCount
+                FROM client_event WHERE created_at >= ?
+                GROUP BY event_type ORDER BY eventCount DESC
+                """, from));
+        data.put("platforms", jdbc.queryForList("""
+                SELECT platform, COUNT(DISTINCT user_id) AS activeUsers, COUNT(*) AS eventCount,
+                       MAX(created_at) AS lastSeenAt
+                FROM client_event WHERE created_at >= ?
+                GROUP BY platform ORDER BY activeUsers DESC
+                """, from));
+        data.put("trend", jdbc.queryForList("""
+                SELECT DATE(created_at) AS day, COUNT(DISTINCT user_id) AS activeUsers, COUNT(*) AS eventCount
+                FROM client_event WHERE created_at >= ?
+                GROUP BY DATE(created_at) ORDER BY day
+                """, from));
         return R.ok(data);
     }
 
@@ -146,7 +200,7 @@ public class AdminController {
                     GROUP BY sr.user_id
                   ) agg_source
                   GROUP BY agg_source.user_id
-                ),
+                )
                 SELECT
                   pu.user_id,
                   pu.custom_id,
@@ -219,6 +273,10 @@ public class AdminController {
                 WHERE user_id = ?
                 ORDER BY created_at DESC
                 LIMIT 20
+                """, userId));
+        detail.put("events", jdbc.queryForList("""
+                SELECT event_type AS eventType, platform, app_version AS appVersion, created_at
+                FROM client_event WHERE user_id = ? ORDER BY created_at DESC LIMIT 100
                 """, userId));
         return R.ok(detail);
     }
@@ -1378,6 +1436,7 @@ public class AdminController {
                       FROM sync_record
                       WHERE table_name = 'health_indicator'
                         AND deleted_at IS NULL
+                        AND NULLIF(JSON_UNQUOTE(JSON_EXTRACT(meta_json, '$.type')), '') IS NOT NULL
                       GROUP BY type
                     ) t
                     GROUP BY type
@@ -1399,6 +1458,7 @@ public class AdminController {
                   WHERE table_name = 'health_indicator'
                     AND deleted_at IS NULL
                     AND user_id = ?
+                    AND NULLIF(JSON_UNQUOTE(JSON_EXTRACT(meta_json, '$.type')), '') IS NOT NULL
                   GROUP BY type
                 ) t
                 GROUP BY type
@@ -1417,6 +1477,20 @@ public class AdminController {
                 tableName
         );
         return legacy + generic;
+    }
+
+    private long retention(LocalDateTime cohortDay, LocalDateTime returnDay) {
+        long cohort = count("""
+                SELECT COUNT(DISTINCT user_id) FROM client_event
+                WHERE created_at >= ? AND created_at < ?
+                """, cohortDay, cohortDay.plusDays(1));
+        if (cohort == 0) return 0;
+        return Math.round(100.0 * count("""
+                SELECT COUNT(DISTINCT first_day.user_id)
+                FROM (SELECT DISTINCT user_id FROM client_event WHERE created_at >= ? AND created_at < ?) first_day
+                JOIN (SELECT DISTINCT user_id FROM client_event WHERE created_at >= ? AND created_at < ?) return_day
+                  ON return_day.user_id = first_day.user_id
+                """, cohortDay, cohortDay.plusDays(1), returnDay, returnDay.plusDays(1)) / cohort);
     }
 
     private List<Map<String, Object>> recentUsers(int limit) {

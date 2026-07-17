@@ -3,6 +3,7 @@ package io.healthresetplan.modules.ai.vision;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.modules.ai.AiUsageLimiter;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -23,9 +24,11 @@ public class AiVisionService {
     private static final long MAX_SIZE_BYTES = 10 * 1024 * 1024L;
 
     private final OneApiService oneApiService;
+    private final AiUsageLimiter usageLimiter;
 
-    public AiVisionService(OneApiService oneApiService) {
+    public AiVisionService(OneApiService oneApiService, AiUsageLimiter usageLimiter) {
         this.oneApiService = oneApiService;
+        this.usageLimiter = usageLimiter;
     }
 
     public Map<String, Object> analyze(String userId, MultipartFile file, String type) {
@@ -40,17 +43,23 @@ public class AiVisionService {
         }
 
         String mimeType = file.getContentType();
-        String raw = oneApiService.analyzeImage(
-                userId,
-                Base64.getEncoder().encodeToString(bytes),
-                mimeType,
-                prompt(normalizedType)
-        );
+        usageLimiter.consume(userId, AiUsageLimiter.Type.IMAGE);
+        try {
+            String raw = oneApiService.analyzeImage(
+                    userId,
+                    Base64.getEncoder().encodeToString(bytes),
+                    mimeType,
+                    prompt(normalizedType)
+            );
 
-        Map<String, Object> result = parseResult(raw, normalizedType);
-        result.put("type", normalizedType);
-        result.put("provider", oneApiService.visionProviderLabel());
-        return result;
+            Map<String, Object> result = parseResult(raw, normalizedType);
+            result.put("type", normalizedType);
+            result.put("provider", oneApiService.visionProviderLabel());
+            return result;
+        } catch (RuntimeException e) {
+            usageLimiter.release(userId, AiUsageLimiter.Type.IMAGE);
+            throw e;
+        }
     }
 
     private void validate(MultipartFile file) {

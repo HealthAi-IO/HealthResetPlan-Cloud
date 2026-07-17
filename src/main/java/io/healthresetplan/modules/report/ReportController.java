@@ -16,9 +16,11 @@ import java.util.List;
 public class ReportController {
 
     private final ReportService reportService;
+    private final io.healthresetplan.modules.ai.AiConsentService consentService;
 
-    public ReportController(ReportService reportService) {
+    public ReportController(ReportService reportService, io.healthresetplan.modules.ai.AiConsentService consentService) {
         this.reportService = reportService;
+        this.consentService = consentService;
     }
 
     /**
@@ -27,7 +29,9 @@ public class ReportController {
      */
     @PostMapping("/analyze")
     public R<AnalyzeResponse> analyze(@RequestParam("file") MultipartFile file) {
-        return R.ok(reportService.analyze(file, currentUserId()));
+        String userId = currentUserId();
+        consentService.requireActive(userId);
+        return R.ok(reportService.analyze(file, userId));
     }
 
     /**

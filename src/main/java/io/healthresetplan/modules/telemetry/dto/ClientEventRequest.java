@@ -16,7 +16,7 @@ public class ClientEventRequest {
     private String channel;
 
     @NotBlank
-    @Pattern(regexp = "^(app_open|api_error|crash|sync_success|sync_failure)$", message = "eventType 不合法")
+    @Pattern(regexp = "^(app_open|home_view|plan_view|clock_view|indicator_view|sync_view|ai_chat|plan_generated|clock_recorded|indicator_recorded|sync_success|sync_failure)$", message = "eventType 不合法")
     private String eventType;
 
     @Size(max = 128)
@@ -38,4 +38,3 @@ public class ClientEventRequest {
     public String getTraceId() { return traceId; }
     public void setTraceId(String traceId) { this.traceId = traceId; }
 }
-
