@@ -39,7 +39,7 @@ http://localhost:8080/api/v1/health
 | `AI_CHAT_QWEN_API_BASE` / `AI_CHAT_DOUBAO_API_BASE` / `AI_CHAT_GLM_API_BASE` / `AI_CHAT_DEEPSEEK_API_BASE` | AI 厂商 OpenAI 兼容接口地址 |
 | `AI_CHAT_QWEN_MODEL` / `AI_CHAT_DOUBAO_MODEL` / `AI_CHAT_GLM_MODEL` / `AI_CHAT_DEEPSEEK_MODEL` | AI 模型名称或接入点 ID |
 | `AI_PLAN_CACHE_MINUTES` | 7 天健康规划缓存分钟数，默认 30 |
-| `AI_PLAN_MAX_COMPLETION_TOKENS` | 7 天健康规划最大输出 token，默认 2200 |
+| `AI_PLAN_MAX_COMPLETION_TOKENS` | 7 天健康规划最大输出 token，默认 4096 |
 
 ## 配置位置
 

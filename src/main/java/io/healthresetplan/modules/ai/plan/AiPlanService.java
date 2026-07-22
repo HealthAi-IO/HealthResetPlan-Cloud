@@ -26,7 +26,7 @@ public class AiPlanService {
     private static final Logger log = LoggerFactory.getLogger(AiPlanService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String CACHE_PREFIX = "hrp:ai:plan:";
-    private static final String PLAN_PROMPT_VERSION = "v2-fast";
+    private static final String PLAN_PROMPT_VERSION = "v3-json";
 
     private static final String SYSTEM_PROMPT = """
             你是健康管理顾问。根据用户档案生成 7 天健康方案，只输出可 JSON.parse 的纯 JSON，不要 Markdown。
@@ -102,7 +102,7 @@ public class AiPlanService {
         usageLimiter.consume(userId, AiUsageLimiter.Type.PLAN);
         try {
             long maxCompletionTokens = Math.max(1200L, oneApiProperties.getPlanMaxCompletionTokens());
-            OneApiService.AiCompletion completion = oneApiService.completeWithProvider(
+            OneApiService.AiCompletion completion = oneApiService.completeJsonWithProvider(
                     userId,
                     messages,
                     preferredProvider,

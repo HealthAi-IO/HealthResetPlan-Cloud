@@ -128,6 +128,25 @@ public class OneApiService {
             String preferredProvider,
             long maxCompletionTokens) {
 
+        return completeWithProvider(userId, messages, preferredProvider, maxCompletionTokens, false);
+    }
+
+    public AiCompletion completeJsonWithProvider(
+            String userId,
+            List<ChatCompletionMessageParam> messages,
+            String preferredProvider,
+            long maxCompletionTokens) {
+
+        return completeWithProvider(userId, messages, preferredProvider, maxCompletionTokens, true);
+    }
+
+    private AiCompletion completeWithProvider(
+            String userId,
+            List<ChatCompletionMessageParam> messages,
+            String preferredProvider,
+            long maxCompletionTokens,
+            boolean jsonOutput) {
+
         boolean rateLimited = false;
         for (String providerName : providerOrder(preferredProvider)) {
             OpenAIClient client = clients.get(providerName);
@@ -135,12 +154,17 @@ public class OneApiService {
 
             String model = providerConfigs.get(providerName).getModel();
             try {
-                var response = client.chat().completions().create(
-                        ChatCompletionCreateParams.builder()
-                                .model(model)
-                                .messages(messages)
-                                .maxCompletionTokens(maxCompletionTokens)
-                                .build());
+                ChatCompletionCreateParams.Builder request = ChatCompletionCreateParams.builder()
+                        .model(model)
+                        .messages(messages)
+                        .maxCompletionTokens(maxCompletionTokens);
+                if (jsonOutput) {
+                    request.responseFormat(ResponseFormatJsonObject.builder().build());
+                    if ("qwen".equalsIgnoreCase(providerName)) {
+                        request.putAdditionalBodyProperty("enable_thinking", JsonValue.from(false));
+                    }
+                }
+                var response = client.chat().completions().create(request.build());
 
                 String content = response.choices().get(0).message().content().orElse("");
                 log.info("AI complete ok provider={} model={}", providerName, model);
