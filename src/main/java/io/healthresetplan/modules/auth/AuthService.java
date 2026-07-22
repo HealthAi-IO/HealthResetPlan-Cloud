@@ -7,6 +7,10 @@ import io.healthresetplan.common.util.HashUtils;
 import io.healthresetplan.common.util.JwtUtils;
 import io.healthresetplan.config.JwtProperties;
 import io.healthresetplan.modules.auth.dto.LoginRequest;
+import io.healthresetplan.modules.auth.dto.PhonePasswordLoginRequest;
+import io.healthresetplan.modules.auth.dto.PhoneRegisterRequest;
+import io.healthresetplan.modules.auth.dto.PhoneRegisterVerifyRequest;
+import io.healthresetplan.modules.auth.dto.PhoneVerificationResponse;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
 import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
@@ -30,6 +34,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -48,6 +53,8 @@ public class AuthService {
     private final JwtUtils jwtUtils;
     private final JwtProperties jwtProperties;
     private final SmsVerificationService smsVerificationService;
+    private final PhoneRegistrationTicketService registrationTicketService;
+    private final JdbcTemplate jdbc;
 
     public AuthService(UserAccountMapper accountMapper,
                        UserCredentialMapper credentialMapper,
@@ -56,7 +63,9 @@ public class AuthService {
                        KeyRetentionService keyRetentionService,
                        JwtUtils jwtUtils,
                        JwtProperties jwtProperties,
-                       SmsVerificationService smsVerificationService) {
+                       SmsVerificationService smsVerificationService,
+                       PhoneRegistrationTicketService registrationTicketService,
+                       JdbcTemplate jdbc) {
         this.accountMapper = accountMapper;
         this.credentialMapper = credentialMapper;
         this.sessionMapper = sessionMapper;
@@ -65,6 +74,8 @@ public class AuthService {
         this.jwtUtils = jwtUtils;
         this.jwtProperties = jwtProperties;
         this.smsVerificationService = smsVerificationService;
+        this.registrationTicketService = registrationTicketService;
+        this.jdbc = jdbc;
     }
 
     @Transactional
@@ -89,7 +100,7 @@ public class AuthService {
 
         UserAccount account = new UserAccount();
         account.setUserId(userId);
-        account.setCustomId("");
+        account.setCustomId(userId);
         account.setPhoneTail(phoneTail(credType, identifier));
         account.setNickname(req.getNickname() != null ? req.getNickname() : "健康用户");
         account.setStatus(1);
@@ -131,14 +142,77 @@ public class AuthService {
     public PasswordResetCodeResponse sendSmsLoginCode(SmsLoginCodeRequest req) {
         String phone = normalizePhone(req.getPhone());
         validatePhone(phone);
-        if (findCredential("phone", phone) == null) {
-            throw new BusinessException(40401, "账号不存在，请先注册");
-        }
         SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
                 SmsVerificationService.SCENE_AUTH,
                 phone
         );
         return new PasswordResetCodeResponse(result.debugCode(), result.expiresIn());
+    }
+
+    public PhoneVerificationResponse verifyPhone(PhoneRegisterVerifyRequest req, HttpServletRequest httpReq) {
+        String phone = normalizePhone(req.getPhone());
+        validatePhone(phone);
+        smsVerificationService.verifyPhoneCode(SmsVerificationService.SCENE_AUTH, phone, req.getCode());
+        UserCredential credential = findCredential("phone", phone);
+        if (credential == null) return PhoneVerificationResponse.register(registrationTicketService.issue(phone));
+        return PhoneVerificationResponse.login(buildTokensAndSession(credential.getUserId(), httpReq));
+    }
+
+    @Transactional
+    public TokenResponse registerPhone(PhoneRegisterRequest req, HttpServletRequest httpReq) {
+        String phone = normalizePhone(req.getPhone());
+        validatePhone(phone);
+        String password = req.getPassword();
+        if (password != null && !password.isBlank()) {
+            validatePassword(password);
+        }
+        if (!req.isAgreedToTerms()) throw new BusinessException(40003, "请先同意用户协议和隐私政策");
+        registrationTicketService.verify(req.getRegistrationTicket(), phone);
+        if (findCredential("phone", phone) != null) {
+            throw new BusinessException(40901, "该手机号已绑定账号，请直接登录");
+        }
+
+        String userId = generateUserId();
+        LocalDateTime now = LocalDateTime.now();
+        UserAccount account = new UserAccount();
+        account.setUserId(userId);
+        account.setCustomId(userId);
+        account.setPhoneTail(phoneTail("phone", phone));
+        account.setNickname(req.getNickname() != null && !req.getNickname().isBlank()
+                ? req.getNickname().trim() : "健康用户");
+        account.setStatus(1);
+        account.setRoleCode("user");
+        account.setHasCloudSync(0);
+        account.setCreatedAt(now);
+        account.setUpdatedAt(now);
+        accountMapper.insert(account);
+
+        UserCredential credential = new UserCredential();
+        credential.setUserId(userId);
+        credential.setCredType("phone");
+        credential.setIdentifierHash(HashUtils.sha256Hex(phone));
+        credential.setSecretHash(password == null || password.isBlank() ? "" : BCRYPT.encode(password));
+        credential.setCreatedAt(now);
+        credential.setUpdatedAt(now);
+        credentialMapper.insert(credential);
+
+        jdbc.update("INSERT INTO user_registration_consent (user_id, agreement_version, accepted_at) VALUES (?, ?, ?)",
+                userId, req.getAgreementVersion(), now);
+
+        registrationTicketService.consume(req.getRegistrationTicket());
+        return buildTokensAndSession(userId, httpReq);
+    }
+
+    @Transactional
+    public TokenResponse loginWithPhonePassword(PhonePasswordLoginRequest req, HttpServletRequest httpReq) {
+        String phone = normalizePhone(req.getPhone());
+        validatePhone(phone);
+        UserCredential credential = findCredential("phone", phone);
+        if (credential == null || credential.getSecretHash() == null || credential.getSecretHash().isBlank()
+                || !BCRYPT.matches(req.getPassword(), credential.getSecretHash())) {
+            throw new BusinessException(40101, "手机号或密码错误");
+        }
+        return buildTokensAndSession(credential.getUserId(), httpReq);
     }
 
     @Transactional
@@ -313,7 +387,34 @@ public class AuthService {
                 .eq(UserSession::getUserId, credential.getUserId()));
     }
 
+    @Transactional
+    public void setInitialPassword(String userId, String password) {
+        if (userId == null || userId.isBlank() || "anonymousUser".equals(userId)) {
+            throw new BusinessException(40101, "请先登录账号");
+        }
+        validatePassword(password);
+        UserCredential credential = credentialMapper.selectOne(new LambdaQueryWrapper<UserCredential>()
+                .eq(UserCredential::getUserId, userId)
+                .eq(UserCredential::getCredType, "phone")
+                .last("LIMIT 1"));
+        if (credential == null) {
+            throw new BusinessException(40401, "账号不存在");
+        }
+        if (credential.getSecretHash() != null && !credential.getSecretHash().isBlank()) {
+            throw new BusinessException(40901, "密码已设置，请使用忘记密码功能修改");
+        }
+        credential.setSecretHash(BCRYPT.encode(password));
+        credential.setUpdatedAt(LocalDateTime.now());
+        credentialMapper.updateById(credential);
+    }
+
     private TokenResponse buildTokensAndSession(String userId, HttpServletRequest httpReq) {
+        UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
+                .eq(UserAccount::getUserId, userId));
+        if (account == null || !Integer.valueOf(1).equals(account.getStatus())) {
+            throw new BusinessException(40301, "账号已被禁用或注销");
+        }
+
         String accessToken = jwtUtils.generateAccessToken(userId);
         String refreshToken = jwtUtils.generateRefreshToken(userId);
 
@@ -335,7 +436,15 @@ public class AuthService {
         sessionMapper.insert(session);
 
         long accessExpiresIn = jwtProperties.getAccessTtlMinutes() * 60L;
-        return new TokenResponse(accessToken, refreshToken, accessExpiresIn, userId);
+        return new TokenResponse(accessToken, refreshToken, accessExpiresIn, userId, hasPassword(userId));
+    }
+
+    private boolean hasPassword(String userId) {
+        UserCredential credential = credentialMapper.selectOne(new LambdaQueryWrapper<UserCredential>()
+                .eq(UserCredential::getUserId, userId)
+                .eq(UserCredential::getCredType, "phone")
+                .last("LIMIT 1"));
+        return credential != null && credential.getSecretHash() != null && !credential.getSecretHash().isBlank();
     }
 
     private UserCredential findCredential(String credType, String identifier) {
@@ -358,7 +467,7 @@ public class AuthService {
 
         UserAccount account = new UserAccount();
         account.setUserId(userId);
-        account.setCustomId("");
+        account.setCustomId(userId);
         account.setPhoneTail(phoneTail("phone", phone));
         account.setNickname(nickname != null && !nickname.isBlank() ? nickname.trim() : "健康用户");
         account.setStatus(1);
@@ -398,6 +507,20 @@ public class AuthService {
 
     private static String normalizePhone(String phone) {
         return phone == null ? "" : phone.replaceAll("\\D", "");
+    }
+
+    private static String normalizeAccountName(String accountName) {
+        String value = accountName == null ? "" : accountName.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!value.matches("^[\\p{IsHan}A-Za-z0-9_]{3,20}$")) {
+            throw new BusinessException(40003, "账户名称仅支持 3-20 位中文、字母、数字或下划线");
+        }
+        return value;
+    }
+
+    private static void validatePassword(String password) {
+        if (password == null || password.length() < 8 || password.length() > 64) {
+            throw new BusinessException(40003, "密码长度需为 8-64 位");
+        }
     }
 
     private static void validatePhone(String phone) {

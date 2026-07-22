@@ -2,6 +2,7 @@ package io.healthresetplan.modules.ai.oneapi;
 
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
+import com.openai.core.JsonValue;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
 import com.openai.errors.UnexpectedStatusCodeException;
@@ -13,6 +14,7 @@ import com.openai.models.chat.completions.ChatCompletionCreateParams;
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import com.openai.models.chat.completions.ChatCompletionSystemMessageParam;
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam;
+import com.openai.models.ResponseFormatJsonObject;
 import io.healthresetplan.common.exception.BusinessException;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -36,6 +38,7 @@ import java.util.function.Consumer;
 public class OneApiService {
 
     private static final Logger log = LoggerFactory.getLogger(OneApiService.class);
+    private static final long OCR_MAX_COMPLETION_TOKENS = 8192L;
 
     private final OneApiProperties props;
     private final JdbcTemplate jdbc;
@@ -212,10 +215,48 @@ public class OneApiService {
         throw new BusinessException(50301, "所有 AI 厂商暂时不可用，请稍后重试");
     }
 
-    public String analyzeImage(String userId, String imageBase64, String mimeType, String prompt) {
+    public VisionCompletion analyzeImage(String userId, String imageBase64, String mimeType, String prompt) {
+        BusinessException lastError = null;
+        for (String providerName : providerOrder(props.getVisionProvider())) {
+            if (!clients.containsKey(providerName)) continue;
+            try {
+                String content = analyzeImageWithProvider(userId, imageBase64, mimeType, prompt, providerName);
+                if (!hasUsableVisionContent(content)) {
+                    lastError = new BusinessException(50301, "OCR 模型返回空内容");
+                    log.warn("OCR provider={} returned empty content, trying next", providerName);
+                    continue;
+                }
+                String model = providerConfigs.get(providerName).getModel();
+                return new VisionCompletion(providerName, model, content);
+            } catch (BusinessException e) {
+                if (e.getCode() != 40101 && e.getCode() != 42902 && e.getCode() != 50301) {
+                    throw e;
+                }
+                lastError = e;
+                log.warn("OCR provider={} unavailable, trying next", providerName);
+            }
+        }
+
+        if (lastError != null && lastError.getCode() == 42902) {
+            throw lastError;
+        }
+        throw new BusinessException(50301, "No vision model is currently available");
+    }
+
+    public record VisionCompletion(String provider, String model, String content) {
+        public String label() {
+            return model == null || model.isBlank() ? provider : provider + " / " + model;
+        }
+    }
+
+    static boolean hasUsableVisionContent(String content) {
+        return content != null && !content.isBlank();
+    }
+
+    private String analyzeImageWithProvider(
+            String userId, String imageBase64, String mimeType, String prompt, String providerName) {
         long startedAt = System.currentTimeMillis();
 
-        String providerName = props.getVisionProvider();
         OpenAIClient client = clients.get(providerName);
         if (client == null) {
             throw new BusinessException(50301, "视觉模型厂商 [" + providerName + "] 未配置");
@@ -241,17 +282,23 @@ public class OneApiService {
                                     .ofArrayOfContentParts(List.of(textContent, imageContent)))
                             .build());
 
-            var response = client.chat().completions().create(
-                    ChatCompletionCreateParams.builder()
-                            .model(model)
-                            .messages(List.of(userMessage))
-                            .maxCompletionTokens(2048L)
-                            .build());
+            ChatCompletionCreateParams.Builder request = ChatCompletionCreateParams.builder()
+                    .model(model)
+                    .messages(List.of(userMessage))
+                    .maxCompletionTokens(OCR_MAX_COMPLETION_TOKENS)
+                    .temperature(0.0);
+            if ("qwen".equalsIgnoreCase(providerName)) {
+                request.responseFormat(ResponseFormatJsonObject.builder().build())
+                        .putAdditionalBodyProperty("enable_thinking", JsonValue.from(false));
+            }
+
+            var response = client.chat().completions().create(request.build());
 
             String content = response.choices().get(0).message().content().orElse("");
-            log.info("OCR complete provider={} model={} elapsedMs={}",
+            log.info("OCR complete provider={} model={} finishReason={} elapsedMs={}",
                     providerName,
                     model,
+                    response.choices().get(0).finishReason().asString(),
                     System.currentTimeMillis() - startedAt);
             return content;
         } catch (RateLimitException e) {
@@ -271,22 +318,15 @@ public class OneApiService {
         }
     }
 
-    public String visionProviderLabel() {
-        String providerName = props.getVisionProvider();
-        var provider = providerConfigs.get(providerName);
-        String model = provider != null ? provider.getModel() : "";
-        return model == null || model.isBlank() ? providerName : providerName + " / " + model;
-    }
-
     private void ensureVisionCapableModel(String providerName, String model) {
         if (!"qwen".equalsIgnoreCase(providerName)) {
             return;
         }
         String normalized = model == null ? "" : model.toLowerCase();
-        if (!normalized.contains("vl")) {
+        if (!normalized.contains("vl") && !normalized.startsWith("qwen3.7-plus")) {
             throw new BusinessException(
                     50301,
-                    "报告图片识别需要视觉模型，请将 AI_CHAT_QWEN3_VL_PLUS_MODEL 配置为 qwen3-vl-plus 等视觉模型");
+                    "报告图片识别需要视觉模型，请将 AI_CHAT_QWEN_MODEL 配置为 qwen3.7-plus 等视觉模型");
         }
     }
 

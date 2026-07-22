@@ -1,6 +1,8 @@
 spring:
   application:
     name: health-reset-plan-cloud
+  config:
+    import: optional:file:./application-local.yml
   profiles:
     active: dev,local
   servlet:

@@ -1,8 +1,6 @@
 package io.healthresetplan.modules.sync;
 
-import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.common.result.R;
-import io.healthresetplan.modules.membership.MembershipService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,10 +19,8 @@ import java.util.Map;
 @RequestMapping("/api/v1/sync")
 public class SyncController {
 
-    private final MembershipService membershipService;
     private final BackendSyncService syncService;
-    public SyncController(MembershipService membershipService, BackendSyncService syncService) {
-        this.membershipService = membershipService;
+    public SyncController(BackendSyncService syncService) {
         this.syncService = syncService;
     }
 
@@ -57,11 +53,7 @@ public class SyncController {
     }
 
     private String requireCloudSync() {
-        String userId = currentUserId();
-        if (!membershipService.hasCloudSync(userId)) {
-            throw new BusinessException(40301, "云同步功能需要开通会员，免费版数据仅保存在本地设备");
-        }
-        return userId;
+        return currentUserId();
     }
 
     private String currentUserId() {

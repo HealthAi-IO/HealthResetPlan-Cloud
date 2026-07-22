@@ -12,6 +12,7 @@ import java.time.Duration;
 public class SmsVerificationService {
 
     public static final String SCENE_AUTH = "auth";
+    public static final String SCENE_PHONE_REGISTER = "phone-register";
     public static final String SCENE_PASSWORD_RESET = "password-reset";
     public static final String SCENE_ACCOUNT_RECOVERY = "account-recovery";
 

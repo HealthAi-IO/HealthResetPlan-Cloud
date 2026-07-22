@@ -3,7 +3,7 @@ package io.healthresetplan.modules.ai.plan;
 /**
  * AI 健康方案生成请求。
  *
- * @param provider     大模型提供方：deepseek / doubao / qwen（可选，默认 deepseek）
+ * @param provider     大模型提供方：deepseek / glm / doubao / qwen（可选）
  * @param age          年龄
  * @param gender       性别：male / female
  * @param heightCm     身高（cm）

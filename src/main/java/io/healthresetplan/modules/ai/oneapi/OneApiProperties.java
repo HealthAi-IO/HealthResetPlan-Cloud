@@ -15,7 +15,7 @@ import java.util.Map;
  * <pre>
  * app:
  *   ai:
- *     chat-order: [qwen, doubao, deepseek]   # 对话模型优先级
+ *     chat-order: [qwen, doubao, glm, deepseek]   # 对话模型优先级
  *     vision-provider: qwen                   # OCR 视觉模型
  *     daily-limit: 30
  *     timeout-seconds: 90
@@ -23,16 +23,19 @@ import java.util.Map;
  *       qwen:
  *         base-url: ${AI_CHAT_QWEN_API_BASE}
  *         api-key: ${AI_CHAT_QWEN_API_KEY}
- *         model: ${AI_CHAT_QWEN3_VL_PLUS_MODEL}
+ *         model: ${AI_CHAT_QWEN_MODEL}
  *       doubao:
  *         base-url: ${AI_CHAT_DOUBAO_API_BASE}
- *         api-key: ${AI_CHAT_DOUBAO_API_KEY}
+ *         api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
  *         model: ${AI_CHAT_DOUBAO_MODEL}
+ *       glm:
+ *         base-url: ${AI_CHAT_GLM_API_BASE}
+ *         api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
+ *         model: ${AI_CHAT_GLM_MODEL}
  *       deepseek:
  *         base-url: ${AI_CHAT_DEEPSEEK_API_BASE}
- *         api-key: ${AI_CHAT_DEEPSEEK_API_KEY}
+ *         api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
  *         model: ${AI_CHAT_DEEPSEEK_MODEL}
- *         web-search-model: ${AI_CHAT_DEEPSEEK_WEB_SEARCH_MODEL}
  * </pre>
  */
 @Component
@@ -43,7 +46,7 @@ public class OneApiProperties {
     private Map<String, ProviderConfig> providers = new HashMap<>();
 
     /** 对话/计划生成的模型尝试顺序 */
-    private List<String> chatOrder = List.of("qwen", "doubao", "deepseek");
+    private List<String> chatOrder = List.of("qwen", "doubao", "glm", "deepseek");
 
     /** 视觉模型厂商（体检报告 OCR） */
     private String visionProvider = "qwen";
@@ -92,7 +95,6 @@ public class OneApiProperties {
         private String apiKey;
         /** AI model name. */
         private String model;
-        private String webSearchModel;
 
         public String getBaseUrl() { return baseUrl; }
         public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
@@ -102,9 +104,6 @@ public class OneApiProperties {
 
         public String getModel() { return model; }
         public void setModel(String model) { this.model = model; }
-
-        public String getWebSearchModel() { return webSearchModel; }
-        public void setWebSearchModel(String webSearchModel) { this.webSearchModel = webSearchModel; }
 
         public boolean isConfigured() {
             return baseUrl != null && !baseUrl.isBlank()

@@ -35,10 +35,9 @@ http://localhost:8080/api/v1/health
 | `JDCLOUD_SMS_SIGN_ID` / `JDCLOUD_SMS_TEMPLATE_ID` | 京东云短信审核通过后的签名 ID / 模板 ID |
 | `SMS_CODE_TTL_SECONDS` / `SMS_RESEND_INTERVAL_SECONDS` | 验证码有效期 / 单手机号发送间隔 |
 | `SMS_MAX_PER_PHONE_PER_HOUR` / `SMS_MAX_PER_PHONE_PER_DAY` | 单手机号每小时 / 每日发送上限 |
-| `AI_CHAT_DEEPSEEK_API_KEY` / `AI_CHAT_DOUBAO_API_KEY` / `AI_CHAT_QWEN_API_KEY` | AI 厂商 Key |
-| `AI_CHAT_DEEPSEEK_API_BASE` / `AI_CHAT_DOUBAO_API_BASE` / `AI_CHAT_QWEN_API_BASE` | AI 厂商 OpenAI 兼容接口地址 |
-| `AI_CHAT_DEEPSEEK_MODEL` / `AI_CHAT_DOUBAO_MODEL` / `AI_CHAT_QWEN3_VL_PLUS_MODEL` | AI 模型名称 |
-| `AI_CHAT_DEEPSEEK_WEB_SEARCH_MODEL` | DeepSeek 联网搜索 Bot 应用 ID |
+| `AI_CHAT_QWEN_API_KEY` / `AI_CHAT_VOLCENGINE_API_KEY` | 千问 / 火山方舟 Key |
+| `AI_CHAT_QWEN_API_BASE` / `AI_CHAT_DOUBAO_API_BASE` / `AI_CHAT_GLM_API_BASE` / `AI_CHAT_DEEPSEEK_API_BASE` | AI 厂商 OpenAI 兼容接口地址 |
+| `AI_CHAT_QWEN_MODEL` / `AI_CHAT_DOUBAO_MODEL` / `AI_CHAT_GLM_MODEL` / `AI_CHAT_DEEPSEEK_MODEL` | AI 模型名称或接入点 ID |
 | `AI_PLAN_CACHE_MINUTES` | 7 天健康规划缓存分钟数，默认 30 |
 | `AI_PLAN_MAX_COMPLETION_TOKENS` | 7 天健康规划最大输出 token，默认 2200 |
 
@@ -51,7 +50,7 @@ AI 配置位于：
 
 后端代码通过 `app.ai.providers.*` 读取这些配置。
 
-本地密钥文件 `application-local.yml` 已被 Git 忽略，其中也只应引用环境变量，禁止写入真实密钥。
+项目根目录的本地密钥文件 `application-local.yml` 已被 Git 忽略，并通过外部配置导入，不会打入构建产物。生产环境仍应使用环境变量。
 
 ## 管理后台安全边界
 

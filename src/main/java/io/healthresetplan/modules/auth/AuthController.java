@@ -1,15 +1,16 @@
 package io.healthresetplan.modules.auth;
 
 import io.healthresetplan.common.result.R;
-import io.healthresetplan.modules.auth.dto.LoginRequest;
 import io.healthresetplan.modules.auth.dto.AccountRecoveryRequest;
-import io.healthresetplan.modules.auth.dto.PasswordResetCodeRequest;
+import io.healthresetplan.modules.auth.dto.PhonePasswordLoginRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
-import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
+import io.healthresetplan.modules.auth.dto.PhoneRegisterRequest;
+import io.healthresetplan.modules.auth.dto.PhoneRegisterVerifyRequest;
+import io.healthresetplan.modules.auth.dto.PhoneVerificationResponse;
 import io.healthresetplan.modules.auth.dto.RefreshRequest;
-import io.healthresetplan.modules.auth.dto.RegisterRequest;
 import io.healthresetplan.modules.auth.dto.SmsLoginCodeRequest;
 import io.healthresetplan.modules.auth.dto.SmsLoginRequest;
+import io.healthresetplan.modules.auth.dto.SetPasswordRequest;
 import io.healthresetplan.modules.auth.dto.TokenResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -29,19 +30,44 @@ public class AuthController {
         this.authService = authService;
     }
 
-    @PostMapping("/register")
-    public R<TokenResponse> register(@Valid @RequestBody RegisterRequest req, HttpServletRequest httpReq) {
-        return R.ok(authService.register(req, httpReq));
+    @PostMapping("/sms/register")
+    public R<TokenResponse> registerPhone(@Valid @RequestBody PhoneRegisterRequest req, HttpServletRequest httpReq) {
+        return R.ok(authService.registerPhone(req, httpReq));
     }
 
     @PostMapping("/login")
-    public R<TokenResponse> login(@Valid @RequestBody LoginRequest req, HttpServletRequest httpReq) {
-        return R.ok(authService.login(req, httpReq));
+    public R<TokenResponse> loginWithPhonePassword(@Valid @RequestBody PhonePasswordLoginRequest req,
+                                                       HttpServletRequest httpReq) {
+        return R.ok(authService.loginWithPhonePassword(req, httpReq));
     }
 
     @PostMapping("/sms/send-code")
     public R<PasswordResetCodeResponse> sendSmsLoginCode(@Valid @RequestBody SmsLoginCodeRequest req) {
         return R.ok(authService.sendSmsLoginCode(req));
+    }
+
+    @PostMapping("/sms/verify")
+    public R<PhoneVerificationResponse> verifyPhone(@Valid @RequestBody PhoneRegisterVerifyRequest req,
+                                                       HttpServletRequest httpReq) {
+        return R.ok(authService.verifyPhone(req, httpReq));
+    }
+
+    @PostMapping("/password-reset/send-code")
+    public R<PasswordResetCodeResponse> sendPasswordResetCode(@Valid @RequestBody io.healthresetplan.modules.auth.dto.PasswordResetCodeRequest req) {
+        return R.ok(authService.sendPasswordResetCode(req));
+    }
+
+    @PostMapping("/password-reset/reset")
+    public R<Void> resetPassword(@Valid @RequestBody io.healthresetplan.modules.auth.dto.PasswordResetRequest req) {
+        authService.resetPassword(req);
+        return R.ok();
+    }
+
+    @PostMapping("/password/set")
+    public R<Void> setInitialPassword(@Valid @RequestBody SetPasswordRequest req) {
+        String userId = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        authService.setInitialPassword(userId, req.getPassword());
+        return R.ok();
     }
 
     @PostMapping("/sms/login")
@@ -77,14 +103,4 @@ public class AuthController {
         return R.ok(authService.sendAccountRecoveryCode(body.get("phone")));
     }
 
-    @PostMapping("/password-reset/send-code")
-    public R<PasswordResetCodeResponse> sendPasswordResetCode(@Valid @RequestBody PasswordResetCodeRequest req) {
-        return R.ok(authService.sendPasswordResetCode(req));
-    }
-
-    @PostMapping("/password-reset/reset")
-    public R<Void> resetPassword(@Valid @RequestBody PasswordResetRequest req) {
-        authService.resetPassword(req);
-        return R.ok();
-    }
 }

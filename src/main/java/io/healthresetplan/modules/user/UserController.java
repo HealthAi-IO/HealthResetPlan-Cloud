@@ -48,14 +48,17 @@ public class UserController {
             return R.fail(40401, "用户不存在");
         }
 
-        // customId 查重
+        // 账户名称全局唯一，按注册时相同的规则标准化。
         if (StringUtils.hasText(req.getCustomId())) {
-            String cid = req.getCustomId().trim();
+            String cid = req.getCustomId().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!cid.matches("^[\\p{IsHan}A-Za-z0-9_]{3,20}$")) {
+                return R.fail(40003, "账户名称仅支持 3-20 位中文、字母、数字或下划线");
+            }
             Long dup = accountMapper.selectCount(new LambdaQueryWrapper<UserAccount>()
                     .eq(UserAccount::getCustomId, cid)
                     .ne(UserAccount::getUserId, userId));
             if (dup != null && dup > 0) {
-                return R.fail(40901, "该展示编号已被占用");
+                return R.fail(40901, "该账户名称已被占用");
             }
         }
 
@@ -68,7 +71,7 @@ public class UserController {
             wrapper.set(UserAccount::getAvatarUrl, req.getAvatarUrl().trim());
         }
         if (StringUtils.hasText(req.getCustomId())) {
-            wrapper.set(UserAccount::getCustomId, req.getCustomId().trim());
+            wrapper.set(UserAccount::getCustomId, req.getCustomId().trim().toLowerCase(java.util.Locale.ROOT));
         }
         accountMapper.update(null, wrapper);
 

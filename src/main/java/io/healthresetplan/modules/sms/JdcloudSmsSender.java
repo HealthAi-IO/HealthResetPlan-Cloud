@@ -40,8 +40,8 @@ public class JdcloudSmsSender implements SmsSender {
             throw new BusinessException(50012, "短信服务配置不完整，请检查京东云短信配置");
         }
 
+        SmsProperties.Jdcloud jdcloud = properties.getJdcloud();
         try {
-            SmsProperties.Jdcloud jdcloud = properties.getJdcloud();
             SmsClient client = SmsClient.builder()
                     .credentialsProvider(new StaticCredentialsProvider(
                             jdcloud.getAccessKeyId(),
@@ -64,15 +64,19 @@ public class JdcloudSmsSender implements SmsSender {
             BatchSendResponse response = client.batchSend(request);
             ServiceError error = response.getError();
             if (error != null) {
-                log.warn("京东云短信发送失败 requestId={} code={} message={}",
-                        response.getRequestId(), error.getCode(), error.getMessage());
+                log.warn("京东云短信发送失败 requestId={} code={} message={} endpoint={} regionId={} signId={} templateId={} phoneTail={}",
+                        response.getRequestId(), error.getCode(), error.getMessage(),
+                        jdcloud.getEndpoint(), properties.getRegionId(), jdcloud.getSignId(),
+                        jdcloud.getTemplateId(), phoneTail(phone));
                 throw new BusinessException(50011, "短信发送失败，请稍后再试");
             }
 
             BatchSendResult result = response.getResult();
             if (result != null && Boolean.FALSE.equals(result.getStatus())) {
-                log.warn("京东云短信发送失败 requestId={} code={} message={}",
-                        response.getRequestId(), result.getCode(), result.getMessage());
+                log.warn("京东云短信发送失败 requestId={} code={} message={} endpoint={} regionId={} signId={} templateId={} phoneTail={}",
+                        response.getRequestId(), result.getCode(), result.getMessage(),
+                        jdcloud.getEndpoint(), properties.getRegionId(), jdcloud.getSignId(),
+                        jdcloud.getTemplateId(), phoneTail(phone));
                 throw new BusinessException(50011, "短信发送失败，请稍后再试");
             }
 
@@ -84,7 +88,9 @@ public class JdcloudSmsSender implements SmsSender {
         } catch (BusinessException ex) {
             throw ex;
         } catch (Exception ex) {
-            log.warn("京东云短信调用异常 phoneTail={}", phoneTail(phone), ex);
+            log.warn("京东云短信调用异常 exceptionType={} message={} endpoint={} regionId={} signId={} templateId={} phoneTail={}",
+                    ex.getClass().getSimpleName(), ex.getMessage(), jdcloud.getEndpoint(),
+                    properties.getRegionId(), jdcloud.getSignId(), jdcloud.getTemplateId(), phoneTail(phone), ex);
             throw new BusinessException(50011, "短信发送失败，请稍后再试");
         }
     }

@@ -5,6 +5,7 @@ import java.util.List;
 public class AnalyzeResponse {
 
     private String reportDate;
+    private int sourceRowCount;
     private List<Indicator> indicators;
     private String summary;
     private String analysisAdvice;
@@ -43,6 +44,9 @@ public class AnalyzeResponse {
 
     public String getReportDate() { return reportDate; }
     public void setReportDate(String reportDate) { this.reportDate = reportDate; }
+
+    public int getSourceRowCount() { return sourceRowCount; }
+    public void setSourceRowCount(int sourceRowCount) { this.sourceRowCount = sourceRowCount; }
 
     public List<Indicator> getIndicators() { return indicators; }
     public void setIndicators(List<Indicator> indicators) { this.indicators = indicators; }

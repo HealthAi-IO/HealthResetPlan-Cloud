@@ -5,6 +5,7 @@ target/
 # 本地密钥配置（绝对不提交到 git）
 src/main/resources/application-local.yml
 src/main/resources/application-local.yaml
+/application-local.yml
 .env
 .env.local
 

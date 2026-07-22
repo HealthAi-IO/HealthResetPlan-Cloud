@@ -40,12 +40,12 @@ app:
       access-key-id: ${JDCLOUD_ACCESS_KEY_ID:}
       secret-access-key: ${JDCLOUD_SECRET_ACCESS_KEY:}
       sign-id: ${JDCLOUD_SMS_SIGN_ID:}
-      template-id: ${JDCLOUD_SMS_TEMPLATE_ID:}
+      template-id: ${JDCLOUD_SMS_TEMPLATE_ID:mb_cd5b4c717b484fa9a89c79de263782bf}
       endpoint: ${JDCLOUD_SMS_ENDPOINT:sms.jdcloud-api.com}
       connect-timeout-millis: ${JDCLOUD_SMS_CONNECT_TIMEOUT_MILLIS:3000}
       read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
   ai:
-    chat-order: [qwen, doubao, deepseek]
+    chat-order: [qwen, doubao, glm, deepseek]
     vision-provider: ${AI_CHAT_VISION_PROVIDER:qwen}
     daily-limit: ${AI_CHAT_DAILY_LIMIT:30}
     timeout-seconds: ${AI_CHAT_TIMEOUT_SECONDS:120}
@@ -54,16 +54,19 @@ app:
     providers:
       deepseek:
         base-url: ${AI_CHAT_DEEPSEEK_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
-        model: ${AI_CHAT_DEEPSEEK_MODEL:deepseek-v3-2-251201}
-        api-key: ${AI_CHAT_DEEPSEEK_API_KEY}
-        web-search-model: ${AI_CHAT_DEEPSEEK_WEB_SEARCH_MODEL:bot-20260413134946-267m7}
+        model: ${AI_CHAT_DEEPSEEK_MODEL:ep-20260721152104-szzhr}
+        api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
       doubao:
         base-url: ${AI_CHAT_DOUBAO_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
-        model: ${AI_CHAT_DOUBAO_MODEL:doubao-seed-1-8-251228}
-        api-key: ${AI_CHAT_DOUBAO_API_KEY}
+        model: ${AI_CHAT_DOUBAO_MODEL:ep-20260721151735-7px4f}
+        api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
+      glm:
+        base-url: ${AI_CHAT_GLM_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
+        model: ${AI_CHAT_GLM_MODEL:ep-20260721151959-wgsk4}
+        api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
       qwen:
         base-url: ${AI_CHAT_QWEN_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}
-        model: ${AI_CHAT_QWEN3_VL_PLUS_MODEL:qwen3-vl-plus}
+        model: ${AI_CHAT_QWEN_MODEL:qwen3.7-plus}
         api-key: ${AI_CHAT_QWEN_API_KEY}
 
 logging:

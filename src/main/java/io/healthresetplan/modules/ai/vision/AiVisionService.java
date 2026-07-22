@@ -45,16 +45,16 @@ public class AiVisionService {
         String mimeType = file.getContentType();
         usageLimiter.consume(userId, AiUsageLimiter.Type.IMAGE);
         try {
-            String raw = oneApiService.analyzeImage(
+            OneApiService.VisionCompletion completion = oneApiService.analyzeImage(
                     userId,
                     Base64.getEncoder().encodeToString(bytes),
                     mimeType,
                     prompt(normalizedType)
             );
 
-            Map<String, Object> result = parseResult(raw, normalizedType);
+            Map<String, Object> result = parseResult(completion.content(), normalizedType);
             result.put("type", normalizedType);
-            result.put("provider", oneApiService.visionProviderLabel());
+            result.put("provider", completion.label());
             return result;
         } catch (RuntimeException e) {
             usageLimiter.release(userId, AiUsageLimiter.Type.IMAGE);

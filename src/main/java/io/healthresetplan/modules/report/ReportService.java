@@ -66,6 +66,7 @@ public class ReportService {
             Schema:
             {
               "reportDate": "YYYY-MM-DD or null",
+              "sourceRowCount": "number of visible medical indicator rows",
               "indicators": [
                 {
                   "category": "blood_sugar|blood_lipid|blood_pressure|liver|kidney|cbc|thyroid|urine|ecg|imaging|other",
@@ -78,10 +79,17 @@ public class ReportService {
               ],
               "summary": "short Chinese summary within 40 chars",
               "analysisAdvice": "short Chinese analysis and advice; must say AI cannot replace a doctor and is only for health suggestions",
-              "rawText": "main recognized report text"
+              "rawText": "non-indicator conclusion text only, or empty string"
             }
-            Rules: no markdown; extract visible medical indicators when present; if no indicators, keep report content in rawText;
-            always generate analysisAdvice; no diagnosis.
+            Rules: no markdown; count every visible medical indicator row first; extract every row exactly once and preserve
+            the original name, value, unit and reference range; sourceRowCount must equal indicators.length; never guess
+            unreadable values; always generate analysisAdvice; no diagnosis.
+            """;
+
+    private static final String OCR_RETRY_SUFFIX = """
+
+            The previous response was incomplete. Re-read the whole image row by row. Return one valid JSON object only.
+            sourceRowCount must exactly equal indicators.length. Do not omit any visible indicator and do not repeat rows.
             """;
 
     private final HealthReportMapper reportMapper;
@@ -120,11 +128,24 @@ public class ReportService {
         String base64 = Base64.getEncoder().encodeToString(bytes);
         usageLimiter.consume(userId, AiUsageLimiter.Type.REPORT);
         try {
-            String rawJson = oneApiService.analyzeImage(userId, base64, mimeType, OCR_FAST_PROMPT);
+            OneApiService.VisionCompletion completion = oneApiService.analyzeImage(
+                    userId, base64, mimeType, OCR_FAST_PROMPT);
             log.info("Report OCR finished elapsedMs={} rawLength={}",
                     System.currentTimeMillis() - startedAt,
-                    rawJson == null ? 0 : rawJson.length());
-            return parseAnalyzeResult(rawJson, oneApiService.visionProviderLabel());
+                    completion.content().length());
+            AnalyzeResponse result = tryParseCompleteResult(completion.content(), completion.label());
+            if (result != null) {
+                return result;
+            }
+
+            log.warn("Report OCR result incomplete, retrying once");
+            OneApiService.VisionCompletion retry = oneApiService.analyzeImage(
+                    userId, base64, mimeType, OCR_FAST_PROMPT + OCR_RETRY_SUFFIX);
+            result = tryParseCompleteResult(retry.content(), retry.label());
+            if (result != null) {
+                return result;
+            }
+            throw new BusinessException(50301, "未能完整识别全部指标，请上传清晰原图或分段拍摄后重试");
         } catch (RuntimeException e) {
             usageLimiter.release(userId, AiUsageLimiter.Type.REPORT);
             throw e;
@@ -174,20 +195,28 @@ public class ReportService {
         reportMapper.deleteById(report.getId());
     }
 
-    private AnalyzeResponse parseAnalyzeResult(String rawJson, String provider) {
+    private AnalyzeResponse tryParseCompleteResult(String rawJson, String provider) {
         String json = extractJsonObject(rawJson);
 
         try {
             AnalyzeResponse response = MAPPER.readValue(json, AnalyzeResponse.class);
-            return normalizeAnalyzeResponse(response, provider);
+            response = normalizeAnalyzeResponse(response, provider);
+            if (!hasAllIndicators(response)) {
+                log.warn("LLM OCR result count mismatch sourceRowCount={} indicatorCount={}",
+                        response.getSourceRowCount(), response.getIndicators().size());
+                return null;
+            }
+            return response;
         } catch (Exception e) {
-            log.warn("LLM OCR JSON parse failed, falling back to raw text: {}", e.getMessage());
-            AnalyzeResponse fallback = new AnalyzeResponse();
-            fallback.setRawText(rawJson);
-            fallback.setSummary("报告已识别，请人工核对原文");
-            fallback.setIndicators(List.of());
-            return normalizeAnalyzeResponse(fallback, provider);
+            log.warn("LLM OCR JSON parse failed: {}", e.getMessage());
+            return null;
         }
+    }
+
+    static boolean hasAllIndicators(AnalyzeResponse response) {
+        return response.getSourceRowCount() > 0
+                && response.getIndicators() != null
+                && response.getSourceRowCount() == response.getIndicators().size();
     }
 
     private String extractJsonObject(String raw) {
