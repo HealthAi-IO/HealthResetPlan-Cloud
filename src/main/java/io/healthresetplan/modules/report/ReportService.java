@@ -82,14 +82,15 @@ public class ReportService {
               "rawText": "non-indicator conclusion text only, or empty string"
             }
             Rules: no markdown; count every visible medical indicator row first; extract every row exactly once and preserve
-            the original name, value, unit and reference range; sourceRowCount must equal indicators.length; never guess
-            unreadable values; always generate analysisAdvice; no diagnosis.
+            the original name, value, unit and reference range; sourceRowCount is the visible row count and
+            indicators may include additional medical conclusions; never guess unreadable values; always generate
+            analysisAdvice; no diagnosis.
             """;
 
     private static final String OCR_RETRY_SUFFIX = """
 
             The previous response was incomplete. Re-read the whole image row by row. Return one valid JSON object only.
-            sourceRowCount must exactly equal indicators.length. Do not omit any visible indicator and do not repeat rows.
+            Do not omit any visible indicator and do not repeat rows.
             """;
 
     private final HealthReportMapper reportMapper;
@@ -214,9 +215,14 @@ public class ReportService {
     }
 
     static boolean hasAllIndicators(AnalyzeResponse response) {
-        return response.getSourceRowCount() > 0
-                && response.getIndicators() != null
-                && response.getSourceRowCount() == response.getIndicators().size();
+        if (response.getIndicators() == null) {
+            return false;
+        }
+        if (response.getSourceRowCount() > 0) {
+            return response.getIndicators().size() >= response.getSourceRowCount();
+        }
+        return !response.getIndicators().isEmpty()
+                || (response.getRawText() != null && !response.getRawText().isBlank());
     }
 
     private String extractJsonObject(String raw) {

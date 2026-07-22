@@ -15,9 +15,20 @@ class ReportServiceTests {
     void acceptsOnlyResultsContainingEverySourceRow() {
         AnalyzeResponse complete = responseWithCounts(17, 17);
         AnalyzeResponse incomplete = responseWithCounts(17, 16);
+        AnalyzeResponse withAdditionalConclusion = responseWithCounts(19, 20);
 
         assertTrue(ReportService.hasAllIndicators(complete));
         assertFalse(ReportService.hasAllIndicators(incomplete));
+        assertTrue(ReportService.hasAllIndicators(withAdditionalConclusion));
+    }
+
+    @Test
+    void acceptsNarrativeReportWithVisibleText() {
+        AnalyzeResponse narrative = responseWithCounts(0, 0);
+        narrative.setRawText("精神心理科处方及诊断说明");
+
+        assertTrue(ReportService.hasAllIndicators(narrative));
+        assertFalse(ReportService.hasAllIndicators(responseWithCounts(0, 0)));
     }
 
     private AnalyzeResponse responseWithCounts(int sourceRows, int indicators) {
