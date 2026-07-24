@@ -15,6 +15,7 @@ import io.healthresetplan.modules.auth.dto.PasswordResetCodeRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
 import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
 import io.healthresetplan.modules.auth.dto.AccountRecoveryRequest;
+import io.healthresetplan.modules.auth.dto.CancelAccountRequest;
 import io.healthresetplan.modules.auth.dto.RefreshRequest;
 import io.healthresetplan.modules.auth.dto.RegisterRequest;
 import io.healthresetplan.modules.auth.dto.SmsLoginCodeRequest;
@@ -54,6 +55,7 @@ public class AuthService {
     private final JwtProperties jwtProperties;
     private final SmsVerificationService smsVerificationService;
     private final PhoneRegistrationTicketService registrationTicketService;
+    private final PasswordLoginThrottleService passwordLoginThrottleService;
     private final JdbcTemplate jdbc;
 
     public AuthService(UserAccountMapper accountMapper,
@@ -65,6 +67,7 @@ public class AuthService {
                        JwtProperties jwtProperties,
                        SmsVerificationService smsVerificationService,
                        PhoneRegistrationTicketService registrationTicketService,
+                       PasswordLoginThrottleService passwordLoginThrottleService,
                        JdbcTemplate jdbc) {
         this.accountMapper = accountMapper;
         this.credentialMapper = credentialMapper;
@@ -75,6 +78,7 @@ public class AuthService {
         this.jwtProperties = jwtProperties;
         this.smsVerificationService = smsVerificationService;
         this.registrationTicketService = registrationTicketService;
+        this.passwordLoginThrottleService = passwordLoginThrottleService;
         this.jdbc = jdbc;
     }
 
@@ -207,11 +211,15 @@ public class AuthService {
     public TokenResponse loginWithPhonePassword(PhonePasswordLoginRequest req, HttpServletRequest httpReq) {
         String phone = normalizePhone(req.getPhone());
         validatePhone(phone);
+        String ip = nullToEmpty(resolveClientIp(httpReq));
+        passwordLoginThrottleService.check(phone, ip);
         UserCredential credential = findCredential("phone", phone);
         if (credential == null || credential.getSecretHash() == null || credential.getSecretHash().isBlank()
                 || !BCRYPT.matches(req.getPassword(), credential.getSecretHash())) {
+            passwordLoginThrottleService.recordFailure(phone, ip);
             throw new BusinessException(40101, "手机号或密码错误");
         }
+        passwordLoginThrottleService.clear(phone, ip);
         return buildTokensAndSession(credential.getUserId(), httpReq);
     }
 
@@ -248,7 +256,7 @@ public class AuthService {
         }
 
         UserSession session = sessionMapper.selectOne(new LambdaQueryWrapper<UserSession>()
-                .eq(UserSession::getRefreshToken, refreshToken));
+                .eq(UserSession::getRefreshToken, HashUtils.sha256Hex(refreshToken)));
         if (session == null || session.getExpiresAt().isBefore(LocalDateTime.now())) {
             throw new BusinessException(40102, "refresh token 已失效，请重新登录");
         }
@@ -264,14 +272,26 @@ public class AuthService {
             return;
         }
         sessionMapper.delete(new LambdaQueryWrapper<UserSession>()
-                .eq(UserSession::getRefreshToken, refreshToken));
+                .eq(UserSession::getRefreshToken, HashUtils.sha256Hex(refreshToken)));
+    }
+
+    public PasswordResetCodeResponse sendCancelAccountCode(String userId, String phone) {
+        String normalizedPhone = normalizeIdentifier("phone", phone);
+        requireOwnedPhone(userId, normalizedPhone);
+        SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
+                SmsVerificationService.SCENE_ACCOUNT_CANCEL, normalizedPhone);
+        return new PasswordResetCodeResponse(result.debugCode(), result.expiresIn());
     }
 
     @Transactional
-    public void cancelAccount(String userId) {
+    public void cancelAccount(String userId, CancelAccountRequest req) {
         if (userId == null || userId.isBlank()) {
             throw new BusinessException(40101, "请先登录账号");
         }
+        String phone = normalizeIdentifier("phone", req.getPhone());
+        requireOwnedPhone(userId, phone);
+        smsVerificationService.verifyPhoneCode(
+                SmsVerificationService.SCENE_ACCOUNT_CANCEL, phone, req.getCode());
 
         UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
                 .eq(UserAccount::getUserId, userId));
@@ -337,7 +357,7 @@ public class AuthService {
         String identifier = normalizeIdentifier(credType, req.getIdentifier());
         UserCredential credential = findCredential(credType, identifier);
         if (credential == null) {
-            throw new BusinessException(40401, "账号不存在");
+            return new PasswordResetCodeResponse("", 600);
         }
         if (!"phone".equals(credType)) {
             throw new BusinessException(40003, "暂不支持邮箱验证码，请使用手机号找回密码");
@@ -354,7 +374,7 @@ public class AuthService {
         String normalizedPhone = normalizeIdentifier("phone", phone);
         UserCredential credential = findCredential("phone", normalizedPhone);
         if (credential == null) {
-            throw new BusinessException(40401, "账号不存在");
+            return new PasswordResetCodeResponse("", 600);
         }
         SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
                 SmsVerificationService.SCENE_ACCOUNT_RECOVERY, normalizedPhone);
@@ -428,7 +448,7 @@ public class AuthService {
         session.setPlatform(normalizePlatform(httpReq.getHeader("X-Platform"), httpReq.getHeader("User-Agent")));
         session.setAppVersion(nullToEmpty(httpReq.getHeader("X-App-Version")));
         session.setChannel(defaultChannel(httpReq.getHeader("X-Channel")));
-        session.setRefreshToken(refreshToken);
+        session.setRefreshToken(HashUtils.sha256Hex(refreshToken));
         session.setIp(nullToEmpty(resolveClientIp(httpReq)));
         session.setUserAgent(nullToEmpty(httpReq.getHeader("User-Agent")));
         session.setExpiresAt(expiresAt);
@@ -445,6 +465,13 @@ public class AuthService {
                 .eq(UserCredential::getCredType, "phone")
                 .last("LIMIT 1"));
         return credential != null && credential.getSecretHash() != null && !credential.getSecretHash().isBlank();
+    }
+
+    private void requireOwnedPhone(String userId, String phone) {
+        UserCredential credential = findCredential("phone", phone);
+        if (credential == null || !credential.getUserId().equals(userId)) {
+            throw new BusinessException(40003, "手机号与当前账号不匹配");
+        }
     }
 
     private UserCredential findCredential(String credType, String identifier) {

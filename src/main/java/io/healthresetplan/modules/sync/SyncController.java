@@ -54,6 +54,17 @@ public class SyncController {
         ));
     }
 
+    @GetMapping("/key-status")
+    public R<Map<String, Object>> keyStatus(
+            @RequestHeader(value = "X-Key-Fingerprint", required = false) String keyFingerprint) {
+        String userId = requireCloudSync();
+        BackendSyncService.KeyStatus status = syncService.keyStatus(userId, keyFingerprint);
+        return R.ok(Map.of(
+                "matchingKeyRecords", status.matchingKeyRecords(),
+                "otherKeyRecords", status.otherKeyRecords()
+        ));
+    }
+
     private String requireCloudSync() {
         return currentUserId();
     }

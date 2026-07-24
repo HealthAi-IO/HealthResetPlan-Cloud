@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.healthresetplan.common.result.R;
 import io.healthresetplan.modules.user.dto.UpdateProfileRequest;
 import io.healthresetplan.modules.user.entity.UserAccount;
+import io.healthresetplan.modules.user.entity.UserCredential;
 import io.healthresetplan.modules.user.mapper.UserAccountMapper;
+import io.healthresetplan.modules.user.mapper.UserCredentialMapper;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -16,9 +18,11 @@ import java.util.Map;
 public class UserController {
 
     private final UserAccountMapper accountMapper;
+    private final UserCredentialMapper credentialMapper;
 
-    public UserController(UserAccountMapper accountMapper) {
+    public UserController(UserAccountMapper accountMapper, UserCredentialMapper credentialMapper) {
         this.accountMapper = accountMapper;
+        this.credentialMapper = credentialMapper;
     }
 
     @GetMapping("/me")
@@ -29,13 +33,15 @@ public class UserController {
         if (account == null) {
             return R.fail(40401, "用户不存在");
         }
+        boolean hasPassword = hasPassword(userId);
         return R.ok(Map.of(
                 "userId", account.getUserId(),
                 "customId", account.getCustomId() != null ? account.getCustomId() : account.getUserId(),
                 "phoneTail", account.getPhoneTail() != null ? account.getPhoneTail() : "",
                 "nickname", account.getNickname(),
                 "avatarUrl", account.getAvatarUrl() != null ? account.getAvatarUrl() : "",
-                "hasCloudSync", account.getHasCloudSync() == 1
+                "hasCloudSync", account.getHasCloudSync() == 1,
+                "hasPassword", hasPassword
         ));
     }
 
@@ -78,6 +84,7 @@ public class UserController {
         // 重新查询获取最新值
         account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
                 .eq(UserAccount::getUserId, userId));
+        boolean hasPassword = hasPassword(userId);
 
         return R.ok(Map.of(
                 "userId", account != null ? account.getUserId() : userId,
@@ -85,7 +92,18 @@ public class UserController {
                 "phoneTail", account != null && account.getPhoneTail() != null ? account.getPhoneTail() : "",
                 "nickname", account != null ? account.getNickname() : "",
                 "avatarUrl", account != null && account.getAvatarUrl() != null ? account.getAvatarUrl() : "",
-                "hasCloudSync", account != null && account.getHasCloudSync() == 1
+                "hasCloudSync", account != null && account.getHasCloudSync() == 1,
+                "hasPassword", hasPassword
         ));
+    }
+
+    private boolean hasPassword(String userId) {
+        UserCredential credential = credentialMapper.selectOne(new LambdaQueryWrapper<UserCredential>()
+                .eq(UserCredential::getUserId, userId)
+                .eq(UserCredential::getCredType, "phone")
+                .last("LIMIT 1"));
+        return credential != null
+                && credential.getSecretHash() != null
+                && !credential.getSecretHash().isBlank();
     }
 }

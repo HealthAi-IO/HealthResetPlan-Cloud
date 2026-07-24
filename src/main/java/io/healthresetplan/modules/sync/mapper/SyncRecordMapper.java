@@ -32,4 +32,20 @@ public interface SyncRecordMapper extends BaseMapper<SyncRecord> {
             @Param("offset") int offset,
             @Param("limit") int limit
     );
+
+    @Select("SELECT COUNT(*) FROM sync_record " +
+            "WHERE user_id = #{userId} AND deleted_at IS NULL " +
+            "AND (key_fingerprint = #{keyFingerprint} OR key_fingerprint = '')")
+    int countByUserAndKey(
+            @Param("userId") String userId,
+            @Param("keyFingerprint") String keyFingerprint
+    );
+
+    @Select("SELECT COUNT(*) FROM sync_record " +
+            "WHERE user_id = #{userId} AND deleted_at IS NULL " +
+            "AND key_fingerprint <> '' AND key_fingerprint <> #{keyFingerprint}")
+    int countByUserAndOtherKey(
+            @Param("userId") String userId,
+            @Param("keyFingerprint") String keyFingerprint
+    );
 }

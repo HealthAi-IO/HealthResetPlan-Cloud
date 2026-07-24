@@ -52,12 +52,20 @@ public class BackendSyncService {
 
     public PushResult push(String userId, String deviceId, String keyFingerprint, List<SyncPushRequest.Item> items) {
         if (items == null || items.isEmpty()) return new PushResult(0, List.of());
-        keyRetentionService.markUsed(userId, normalizeFingerprint(keyFingerprint));
+        var normalizedFingerprint = normalizeFingerprint(keyFingerprint);
+        var status = keyStatus(userId, normalizedFingerprint);
+        boolean migrationBatch = items.stream()
+                .allMatch(item -> item != null
+                        && (Boolean.TRUE.equals(item.deleted()) || Boolean.TRUE.equals(item.keyMigration())));
+        if (status.otherKeyRecords() > 0 && !migrationBatch) {
+            throw new BusinessException(40901, "检测到同一账号存在其他主密钥加密的数据，请恢复主设备的 24 词助记词后再同步");
+        }
+        keyRetentionService.markUsed(userId, normalizedFingerprint);
         int accepted = 0;
         var rejected = new ArrayList<SyncRef>();
         for (var item : items) {
             validateItem(item);
-            if (pushRecord(userId, deviceId != null ? deviceId : "", normalizeFingerprint(keyFingerprint), item)) {
+            if (pushRecord(userId, deviceId != null ? deviceId : "", normalizedFingerprint, item)) {
                 accepted++;
             } else {
                 rejected.add(new SyncRef(item.table(), item.clientId()));
@@ -204,11 +212,21 @@ public class BackendSyncService {
         return new PullPage(ordered.subList(0, end), ordered.size() > cappedLimit);
     }
 
+    public KeyStatus keyStatus(String userId, String keyFingerprint) {
+        var normalizedFingerprint = normalizeFingerprint(keyFingerprint);
+        return new KeyStatus(
+                syncRecordMapper.countByUserAndKey(userId, normalizedFingerprint),
+                syncRecordMapper.countByUserAndOtherKey(userId, normalizedFingerprint)
+        );
+    }
+
     public record PullPage(List<SyncPullItem> items, boolean hasMore) {}
 
     public record PushResult(int accepted, List<SyncRef> rejected) {}
 
     public record SyncRef(String table, String clientId) {}
+
+    public record KeyStatus(int matchingKeyRecords, int otherKeyRecords) {}
 
     private String normalizeFingerprint(String keyFingerprint) {
         return keyFingerprint == null ? "" : keyFingerprint.trim();

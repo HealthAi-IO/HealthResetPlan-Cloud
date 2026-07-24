@@ -26,6 +26,47 @@ public class PublicReleaseController {
         this.jdbc = jdbc;
     }
 
+    @GetMapping("/latest")
+    public R<Map<String, Object>> latest(
+            @RequestParam String platform,
+            @RequestParam(required = false, defaultValue = "official") String channel) {
+        String normalizedPlatform = normalize(platform);
+        String normalizedChannel = normalize(channel);
+        if (!PLATFORMS.contains(normalizedPlatform) || normalizedChannel.isBlank()) {
+            throw new BusinessException(40001, "平台或发布渠道不合法");
+        }
+
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT version_name, package_size_mb, package_url,
+                       COALESCE(released_at, updated_at) AS updated_at
+                FROM app_release
+                WHERE deleted_at IS NULL
+                  AND status = 1
+                  AND release_stage = 'release'
+                  AND platform = ?
+                  AND channel = ?
+                ORDER BY version_code DESC, COALESCE(released_at, updated_at) DESC
+                LIMIT 1
+                """, normalizedPlatform, normalizedChannel);
+
+        if (rows.isEmpty()) {
+            return R.ok(Map.of(
+                    "available", false,
+                    "platform", normalizedPlatform
+            ));
+        }
+
+        Map<String, Object> release = rows.get(0);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("available", true);
+        response.put("platform", normalizedPlatform);
+        response.put("version", release.get("version_name"));
+        response.put("sizeMb", release.get("package_size_mb"));
+        response.put("downloadUrl", release.get("package_url"));
+        response.put("updatedAt", release.get("updated_at"));
+        return R.ok(response);
+    }
+
     @GetMapping("/check")
     public R<Map<String, Object>> check(
             @RequestParam String platform,
@@ -139,4 +180,3 @@ public class PublicReleaseController {
         return value instanceof Number number ? number.intValue() : 0;
     }
 }
-

@@ -55,6 +55,7 @@ class AuthServiceRegistrationTests {
                 jwtProperties,
                 mock(SmsVerificationService.class),
                 ticketService,
+                mock(PasswordLoginThrottleService.class),
                 mock(JdbcTemplate.class)
         );
         HttpServletRequest request = mock(HttpServletRequest.class);

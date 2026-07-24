@@ -44,7 +44,11 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
-                        .requestMatchers("/api/v1/auth/password/set").authenticated()
+                        .requestMatchers(
+                                "/api/v1/auth/password/set",
+                                "/api/v1/auth/cancel-account",
+                                "/api/v1/auth/cancel-account/send-code"
+                        ).authenticated()
                         .requestMatchers(
                                 "/api/v1/admin/auth/login",
                                 "/api/v1/admin/auth/refresh",
@@ -88,6 +92,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/v1/auth/**",
                                 "/api/v1/releases/check",
+                                "/api/v1/releases/latest",
                                 "/api/v1/files/avatar/**",         // 头像公开可读
                                 "/api/v1/health",
                                 "/v3/api-docs/**",

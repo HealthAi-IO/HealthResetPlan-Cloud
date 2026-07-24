@@ -15,6 +15,7 @@ public class SmsVerificationService {
     public static final String SCENE_PHONE_REGISTER = "phone-register";
     public static final String SCENE_PASSWORD_RESET = "password-reset";
     public static final String SCENE_ACCOUNT_RECOVERY = "account-recovery";
+    public static final String SCENE_ACCOUNT_CANCEL = "account-cancel";
 
     private static final Logger log = LoggerFactory.getLogger(SmsVerificationService.class);
     private static final SecureRandom RANDOM = new SecureRandom();
