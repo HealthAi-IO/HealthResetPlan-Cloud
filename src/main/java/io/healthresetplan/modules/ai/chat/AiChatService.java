@@ -101,7 +101,7 @@ public class AiChatService {
 
     private void checkMembership(String userId) {
         if (!membershipService.hasFeature(userId, "cloud_sync")) {
-            throw new BusinessException(40301, "AI 对话是会员专属功能，请先开通会员");
+            throw new BusinessException(40301, "请先登录手机号账号");
         }
     }
 

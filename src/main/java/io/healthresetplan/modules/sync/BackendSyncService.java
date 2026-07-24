@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -28,7 +29,9 @@ public class BackendSyncService {
             "clock_record",
             "reminder",
             "health_report",
-            "meal_record"
+            "meal_record",
+            "ai_session",
+            "ai_message"
     );
 
     private final SyncRecordMapper syncRecordMapper;
@@ -47,16 +50,20 @@ public class BackendSyncService {
         this.objectMapper = objectMapper;
     }
 
-    public int push(String userId, String deviceId, String keyFingerprint, List<SyncPushRequest.Item> items) {
-        if (items == null || items.isEmpty()) return 0;
+    public PushResult push(String userId, String deviceId, String keyFingerprint, List<SyncPushRequest.Item> items) {
+        if (items == null || items.isEmpty()) return new PushResult(0, List.of());
         keyRetentionService.markUsed(userId, normalizeFingerprint(keyFingerprint));
         int accepted = 0;
+        var rejected = new ArrayList<SyncRef>();
         for (var item : items) {
             validateItem(item);
-            pushRecord(userId, deviceId != null ? deviceId : "", normalizeFingerprint(keyFingerprint), item);
-            accepted++;
+            if (pushRecord(userId, deviceId != null ? deviceId : "", normalizeFingerprint(keyFingerprint), item)) {
+                accepted++;
+            } else {
+                rejected.add(new SyncRef(item.table(), item.clientId()));
+            }
         }
-        return accepted;
+        return new PushResult(accepted, rejected);
     }
 
     private void validateItem(SyncPushRequest.Item item) {
@@ -79,7 +86,7 @@ public class BackendSyncService {
         }
     }
 
-    private void pushRecord(String userId, String deviceId, String keyFingerprint, SyncPushRequest.Item item) {
+    private boolean pushRecord(String userId, String deviceId, String keyFingerprint, SyncPushRequest.Item item) {
         var existing = syncRecordMapper.selectOneIncludingDeleted(userId, item.table(), item.clientId());
 
         var now = LocalDateTime.now();
@@ -108,11 +115,17 @@ public class BackendSyncService {
             record.setDeletedAt(deleted ? now : null);
             record.setVersion(version);
             syncRecordMapper.insert(record);
-            return;
+            return true;
         }
 
-        long serverVersion = existing.getVersion() != null ? existing.getVersion() : 0L;
-        if (version >= serverVersion) {
+        var serverUpdatedAt = existing.getClientUpdatedAt();
+        boolean keyChanged = !Objects.equals(existing.getKeyFingerprint(), keyFingerprint);
+        boolean clientIsNewer = serverUpdatedAt == null || clientUpdatedAt.isAfter(serverUpdatedAt);
+        boolean sameUpdateTime = serverUpdatedAt != null && clientUpdatedAt.isEqual(serverUpdatedAt);
+        boolean deviceWinsTie = sameUpdateTime && deviceId.compareTo(
+                existing.getDeviceId() != null ? existing.getDeviceId() : "") > 0;
+        boolean isKeyMigration = Boolean.TRUE.equals(item.keyMigration());
+        if ((isKeyMigration && keyChanged) || clientIsNewer || deviceWinsTie) {
             existing.setKeyFingerprint(keyFingerprint);
             existing.setPayloadCipher(item.cipher());
             existing.setPayloadIv(item.iv());
@@ -126,7 +139,9 @@ public class BackendSyncService {
             existing.setDeletedAt(deleted ? now : null);
             existing.setVersion(version);
             syncRecordMapper.updateById(existing);
+            return true;
         }
+        return false;
     }
 
     public PullPage pull(String userId, String keyFingerprint, long sinceMs, long untilMs, int offset, int limit) {
@@ -139,11 +154,10 @@ public class BackendSyncService {
 
         var cappedLimit = Math.min(limit, 500);
         var safeOffset = Math.max(offset, 0);
-        var fetchLimit = Math.min(safeOffset + cappedLimit + 1, 10_001);
         var items = new ArrayList<SyncPullItem>();
 
         syncRecordMapper
-                .selectByUserBetweenAndKey(userId, normalizedFingerprint, since, until, fetchLimit)
+                .selectByUserBetweenAndKey(userId, normalizedFingerprint, since, until, safeOffset, cappedLimit + 1)
                 .stream()
                 .map(record -> new SyncPullItem(
                         record.getTableName(),
@@ -161,37 +175,40 @@ public class BackendSyncService {
                 ))
                 .forEach(items::add);
 
-        // Compatibility for data written before the generic sync_record table:
-        // old health_indicator rows encrypted only payload_json. New clients
-        // detect that format and rebuild a local health_indicator row.
-        healthIndicatorMapper
-                .selectByUserBetween(userId, since, until, fetchLimit)
-                .stream()
-                .map(record -> new SyncPullItem(
-                        "health_indicator",
-                        record.getClientId(),
-                        record.getVersion() != null ? record.getVersion() : 0L,
-                        record.getClientUpdatedAt() != null
-                                ? toEpochMilli(record.getClientUpdatedAt())
-                                : 0L,
-                        record.getPayloadCipher(),
-                        record.getPayloadIv(),
-                        record.getPayloadTag(),
-                        record.getAlg() != null ? record.getAlg() : "aes-256-gcm:v1",
-                        false,
-                        healthIndicatorMeta(record)
-                ))
-                .forEach(items::add);
+        if (normalizedFingerprint.isBlank()) {
+            healthIndicatorMapper
+                    .selectByUserBetween(userId, since, until, cappedLimit + 1)
+                    .stream()
+                    .map(record -> new SyncPullItem(
+                            "health_indicator",
+                            record.getClientId(),
+                            record.getVersion() != null ? record.getVersion() : 0L,
+                            record.getClientUpdatedAt() != null
+                                    ? toEpochMilli(record.getClientUpdatedAt())
+                                    : 0L,
+                            record.getPayloadCipher(),
+                            record.getPayloadIv(),
+                            record.getPayloadTag(),
+                            record.getAlg() != null ? record.getAlg() : "aes-256-gcm:v1",
+                            false,
+                            healthIndicatorMeta(record)
+                    ))
+                    .forEach(items::add);
+        }
 
         var ordered = items.stream()
                 .sorted(Comparator.comparingLong(SyncPullItem::clientUpdatedAt))
                 .toList();
-        if (safeOffset >= ordered.size()) return new PullPage(List.of(), false);
-        int end = Math.min(safeOffset + cappedLimit, ordered.size());
-        return new PullPage(ordered.subList(safeOffset, end), end < ordered.size());
+        if (ordered.isEmpty()) return new PullPage(List.of(), false);
+        int end = Math.min(cappedLimit, ordered.size());
+        return new PullPage(ordered.subList(0, end), ordered.size() > cappedLimit);
     }
 
     public record PullPage(List<SyncPullItem> items, boolean hasMore) {}
+
+    public record PushResult(int accepted, List<SyncRef> rejected) {}
+
+    public record SyncRef(String table, String clientId) {}
 
     private String normalizeFingerprint(String keyFingerprint) {
         return keyFingerprint == null ? "" : keyFingerprint.trim();

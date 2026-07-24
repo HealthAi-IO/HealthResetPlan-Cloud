@@ -27,9 +27,11 @@ public class SyncController {
     @PostMapping("/push")
     public R<Map<String, Object>> push(@Valid @RequestBody SyncPushRequest request) {
         String userId = requireCloudSync();
-        int accepted = syncService.push(userId, request.deviceId(), request.keyFingerprint(), request.items());
+        BackendSyncService.PushResult result = syncService.push(
+                userId, request.deviceId(), request.keyFingerprint(), request.items());
         return R.ok(Map.of(
-                "accepted", accepted,
+                "accepted", result.accepted(),
+                "rejected", result.rejected(),
                 "serverTime", Instant.now().toEpochMilli()
         ));
     }

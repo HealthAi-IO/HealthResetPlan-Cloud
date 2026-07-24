@@ -16,11 +16,12 @@ public record SyncPushRequest(
             @NotBlank String clientId,
             long version,
             long clientUpdatedAt,
-            @NotBlank String cipher,
-            @NotBlank String iv,
-            @NotBlank String tag,
+            String cipher,
+            String iv,
+            String tag,
             String alg,
             Boolean deleted,
+            Boolean keyMigration,
             Map<String, Object> meta
     ) {
     }

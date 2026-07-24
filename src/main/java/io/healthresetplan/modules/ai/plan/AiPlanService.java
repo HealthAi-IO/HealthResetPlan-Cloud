@@ -84,7 +84,7 @@ public class AiPlanService {
     public AiPlanResponse generate(String userId, AiPlanRequest req) {
         validateProfile(req);
         if (!membershipService.hasFeature(userId, "cloud_sync")) {
-            throw new BusinessException(40301, "AI 方案生成是会员专属功能，请先开通会员");
+            throw new BusinessException(40301, "请先登录手机号账号");
         }
         String safetyReply = MedicalRiskGuard.safetyReply(buildUserMessage(req));
         if (safetyReply != null) {

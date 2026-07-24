@@ -18,9 +18,9 @@ public class AiPlanController {
     }
 
     /**
-     * AI 生成 7 天健康方案（会员专属）。
+     * AI 生成 7 天健康方案。
      *
-     * <p>由 JWT 过滤器保证已登录；会员资格在 Service 层校验。</p>
+     * <p>由 JWT 过滤器保证已登录。</p>
      */
     @PostMapping("/generate")
     public R<AiPlanResponse> generate(@Valid @RequestBody AiPlanRequest req) {

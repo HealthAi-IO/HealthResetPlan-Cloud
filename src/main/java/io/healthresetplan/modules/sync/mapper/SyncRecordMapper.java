@@ -23,12 +23,13 @@ public interface SyncRecordMapper extends BaseMapper<SyncRecord> {
             "WHERE user_id = #{userId} " +
             "AND (#{keyFingerprint} = '' OR key_fingerprint = #{keyFingerprint} OR key_fingerprint = '') " +
             "AND server_updated_at > #{since} AND server_updated_at <= #{until} " +
-            "ORDER BY server_updated_at ASC, id ASC LIMIT #{limit}")
+            "ORDER BY server_updated_at ASC, id ASC LIMIT #{limit} OFFSET #{offset}")
     List<SyncRecord> selectByUserBetweenAndKey(
             @Param("userId") String userId,
             @Param("keyFingerprint") String keyFingerprint,
             @Param("since") LocalDateTime since,
             @Param("until") LocalDateTime until,
+            @Param("offset") int offset,
             @Param("limit") int limit
     );
 }
