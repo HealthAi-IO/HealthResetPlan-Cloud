@@ -2,6 +2,7 @@ package io.healthresetplan.modules.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.modules.auth.dto.PhoneRegisterRequest;
+import io.healthresetplan.modules.auth.dto.SmsLoginCodeRequest;
 import io.healthresetplan.modules.auth.dto.TokenResponse;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -21,6 +22,18 @@ class AuthDtoTests {
         try (var factory = Validation.buildDefaultValidatorFactory()) {
             Validator validator = factory.getValidator();
             assertTrue(validator.validate(request).isEmpty());
+        }
+    }
+
+    @Test
+    void smsLoginCodeRequiresCaptchaTicket() {
+        SmsLoginCodeRequest request = new SmsLoginCodeRequest();
+        request.setPhone("13800138000");
+
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            Validator validator = factory.getValidator();
+            assertTrue(validator.validate(request).stream()
+                    .anyMatch(error -> "captchaTicket".equals(error.getPropertyPath().toString())));
         }
     }
 

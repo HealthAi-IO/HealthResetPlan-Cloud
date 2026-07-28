@@ -17,9 +17,15 @@ spring:
     encoding: UTF-8
 
 app:
-  files:
-    # 加密文件本地存储根目录（后续可换 OSS，只改此处）
-    storage-path: ${FILES_STORAGE_PATH:/home/lyt/hrp-uploads}
+  data-encryption:
+    key: ${DATA_ENCRYPTION_KEY:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+    key-version: ${DATA_ENCRYPTION_KEY_VERSION:1}
+  oss:
+    access-key-id: ${JDCLOUD_OSS_ACCESS_KEY_ID:}
+    secret-access-key: ${JDCLOUD_OSS_SECRET_ACCESS_KEY:}
+    region: ${JDCLOUD_OSS_REGION:cn-north-1}
+    endpoint: ${JDCLOUD_OSS_ENDPOINT:https://s3-internal.cn-north-1.jdcloud-oss.com}
+    bucket: ${JDCLOUD_OSS_BUCKET:health-reset-plan-private}
   jwt:
     secret: ${JWT_SECRET:replace-me-in-real-env-please-replace-me-please}
     # 开发环境：access 100 年、refresh 100 年，相当于不过期；生产环境请改回合理值

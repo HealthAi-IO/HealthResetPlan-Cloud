@@ -7,6 +7,7 @@ import io.healthresetplan.modules.user.entity.UserAccount;
 import io.healthresetplan.modules.user.entity.UserCredential;
 import io.healthresetplan.modules.user.mapper.UserAccountMapper;
 import io.healthresetplan.modules.user.mapper.UserCredentialMapper;
+import io.healthresetplan.modules.files.FileStorageService;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -19,10 +20,15 @@ public class UserController {
 
     private final UserAccountMapper accountMapper;
     private final UserCredentialMapper credentialMapper;
+    private final FileStorageService fileStorageService;
 
-    public UserController(UserAccountMapper accountMapper, UserCredentialMapper credentialMapper) {
+    public UserController(
+            UserAccountMapper accountMapper,
+            UserCredentialMapper credentialMapper,
+            FileStorageService fileStorageService) {
         this.accountMapper = accountMapper;
         this.credentialMapper = credentialMapper;
+        this.fileStorageService = fileStorageService;
     }
 
     @GetMapping("/me")
@@ -40,7 +46,7 @@ public class UserController {
                 "phoneTail", account.getPhoneTail() != null ? account.getPhoneTail() : "",
                 "nickname", account.getNickname(),
                 "avatarUrl", account.getAvatarUrl() != null ? account.getAvatarUrl() : "",
-                "hasCloudSync", account.getHasCloudSync() == 1,
+                "hasCloudSync", true,
                 "hasPassword", hasPassword
         ));
     }
@@ -74,6 +80,7 @@ public class UserController {
             wrapper.set(UserAccount::getNickname, req.getNickname().trim());
         }
         if (StringUtils.hasText(req.getAvatarUrl())) {
+            deleteReplacedAvatar(account.getAvatarUrl(), req.getAvatarUrl(), userId);
             wrapper.set(UserAccount::getAvatarUrl, req.getAvatarUrl().trim());
         }
         if (StringUtils.hasText(req.getCustomId())) {
@@ -92,7 +99,7 @@ public class UserController {
                 "phoneTail", account != null && account.getPhoneTail() != null ? account.getPhoneTail() : "",
                 "nickname", account != null ? account.getNickname() : "",
                 "avatarUrl", account != null && account.getAvatarUrl() != null ? account.getAvatarUrl() : "",
-                "hasCloudSync", account != null && account.getHasCloudSync() == 1,
+                "hasCloudSync", true,
                 "hasPassword", hasPassword
         ));
     }
@@ -105,5 +112,14 @@ public class UserController {
         return credential != null
                 && credential.getSecretHash() != null
                 && !credential.getSecretHash().isBlank();
+    }
+
+    private void deleteReplacedAvatar(String previous, String next, String userId) {
+        if (previous == null || previous.equals(next)) return;
+        int marker = previous.indexOf("objectKey=");
+        if (marker < 0) return;
+        String objectKey = java.net.URLDecoder.decode(
+                previous.substring(marker + "objectKey=".length()), java.nio.charset.StandardCharsets.UTF_8);
+        fileStorageService.delete(objectKey, userId);
     }
 }

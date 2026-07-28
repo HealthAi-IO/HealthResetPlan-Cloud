@@ -9,10 +9,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class MembershipService {
 
-    public boolean hasCloudSync(String userId) {
-        return userId != null && !userId.isBlank();
-    }
-
     public boolean hasFeature(String userId, String feature) {
         return userId != null && !userId.isBlank();
     }

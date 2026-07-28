@@ -21,8 +21,15 @@ springdoc:
     enabled: false
 
 app:
-  files:
-    storage-path: ${FILES_STORAGE_PATH}
+  data-encryption:
+    key: ${DATA_ENCRYPTION_KEY}
+    key-version: ${DATA_ENCRYPTION_KEY_VERSION:1}
+  oss:
+    access-key-id: ${JDCLOUD_OSS_ACCESS_KEY_ID}
+    secret-access-key: ${JDCLOUD_OSS_SECRET_ACCESS_KEY}
+    region: ${JDCLOUD_OSS_REGION:cn-north-1}
+    endpoint: ${JDCLOUD_OSS_ENDPOINT:https://s3-internal.cn-north-1.jdcloud-oss.com}
+    bucket: ${JDCLOUD_OSS_BUCKET:health-reset-plan-private}
   jwt:
     secret: ${JWT_SECRET}
     access-ttl-minutes: 60

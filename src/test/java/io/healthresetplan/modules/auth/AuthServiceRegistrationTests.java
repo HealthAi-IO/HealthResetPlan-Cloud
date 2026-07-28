@@ -3,12 +3,13 @@ package io.healthresetplan.modules.auth;
 import io.healthresetplan.common.util.JwtUtils;
 import io.healthresetplan.config.JwtProperties;
 import io.healthresetplan.modules.auth.dto.PhoneRegisterRequest;
+import io.healthresetplan.modules.captcha.CaptchaService;
+import io.healthresetplan.modules.data.UserDataService;
+import io.healthresetplan.modules.files.FileStorageService;
 import io.healthresetplan.modules.sms.SmsVerificationService;
-import io.healthresetplan.modules.sync.KeyRetentionService;
 import io.healthresetplan.modules.user.entity.UserAccount;
 import io.healthresetplan.modules.user.mapper.UserAccountMapper;
 import io.healthresetplan.modules.user.mapper.UserCredentialMapper;
-import io.healthresetplan.modules.user.mapper.UserKeyMetaMapper;
 import io.healthresetplan.modules.user.mapper.UserSessionMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
@@ -49,13 +50,14 @@ class AuthServiceRegistrationTests {
                 accountMapper,
                 credentialMapper,
                 sessionMapper,
-                mock(UserKeyMetaMapper.class),
-                mock(KeyRetentionService.class),
+                mock(UserDataService.class),
+                mock(FileStorageService.class),
                 jwtUtils,
                 jwtProperties,
                 mock(SmsVerificationService.class),
                 ticketService,
                 mock(PasswordLoginThrottleService.class),
+                mock(CaptchaService.class),
                 mock(JdbcTemplate.class)
         );
         HttpServletRequest request = mock(HttpServletRequest.class);

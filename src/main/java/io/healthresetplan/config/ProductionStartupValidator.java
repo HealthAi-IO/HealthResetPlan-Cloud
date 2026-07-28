@@ -14,17 +14,30 @@ public class ProductionStartupValidator implements ApplicationRunner {
     private final JwtProperties jwt;
     private final SmsProperties sms;
     private final OneApiProperties ai;
+    private final DataEncryptionProperties dataEncryption;
+    private final OssProperties oss;
 
-    public ProductionStartupValidator(JwtProperties jwt, SmsProperties sms, OneApiProperties ai) {
+    public ProductionStartupValidator(
+            JwtProperties jwt,
+            SmsProperties sms,
+            OneApiProperties ai,
+            DataEncryptionProperties dataEncryption,
+            OssProperties oss) {
         this.jwt = jwt;
         this.sms = sms;
         this.ai = ai;
+        this.dataEncryption = dataEncryption;
+        this.oss = oss;
     }
 
     @Override
     public void run(ApplicationArguments args) {
         require(jwt.getSecret(), "JWT_SECRET", 32);
-        require(System.getenv("FILES_STORAGE_PATH"), "FILES_STORAGE_PATH", 1);
+        require(dataEncryption.getKey(), "DATA_ENCRYPTION_KEY", 44);
+        require(oss.getAccessKeyId(), "JDCLOUD_OSS_ACCESS_KEY_ID", 8);
+        require(oss.getSecretAccessKey(), "JDCLOUD_OSS_SECRET_ACCESS_KEY", 16);
+        require(oss.getEndpoint(), "JDCLOUD_OSS_ENDPOINT", 8);
+        require(oss.getBucket(), "JDCLOUD_OSS_BUCKET", 3);
         if (!sms.isDebugCodeEnabled() && !sms.isJdcloudReady()) {
             throw new IllegalStateException("生产环境必须关闭短信调试验证码并配置短信服务");
         }

@@ -51,7 +51,7 @@ public class AdminController {
         data.put("stats", mapOf(
                 "totalUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL"),
                 "todayNewUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL AND created_at >= ?", today),
-                "cloudSyncUsers", count("SELECT COUNT(*) FROM user_account WHERE deleted_at IS NULL AND has_cloud_sync = 1"),
+                "cloudSyncUsers", count("SELECT COUNT(*) FROM user_data_state"),
                 "healthIndicators", healthIndicators,
                 "reports", reports
         ));
@@ -142,7 +142,7 @@ public class AdminController {
 
         Long total = queryLong("SELECT COUNT(*) FROM user_account ua" + where, countArgs);
         // Page first, then aggregate only the current page's users. This keeps admin
-        // user list latency stable when health/sync rows grow with user volume.
+        // Keep user-list latency stable when business rows grow with user volume.
         String sql = """
                 WITH page_users AS (
                   SELECT

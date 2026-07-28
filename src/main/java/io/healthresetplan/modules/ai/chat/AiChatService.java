@@ -100,7 +100,7 @@ public class AiChatService {
     // ── 内部工具 ─────────────────────────────────────────────────
 
     private void checkMembership(String userId) {
-        if (!membershipService.hasFeature(userId, "cloud_sync")) {
+        if (!membershipService.hasFeature(userId, "ai_chat")) {
             throw new BusinessException(40301, "请先登录手机号账号");
         }
     }

@@ -14,23 +14,22 @@ import io.healthresetplan.modules.auth.dto.PhoneVerificationResponse;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeRequest;
 import io.healthresetplan.modules.auth.dto.PasswordResetCodeResponse;
 import io.healthresetplan.modules.auth.dto.PasswordResetRequest;
-import io.healthresetplan.modules.auth.dto.AccountRecoveryRequest;
 import io.healthresetplan.modules.auth.dto.CancelAccountRequest;
 import io.healthresetplan.modules.auth.dto.RefreshRequest;
 import io.healthresetplan.modules.auth.dto.RegisterRequest;
 import io.healthresetplan.modules.auth.dto.SmsLoginCodeRequest;
 import io.healthresetplan.modules.auth.dto.SmsLoginRequest;
 import io.healthresetplan.modules.auth.dto.TokenResponse;
+import io.healthresetplan.modules.captcha.CaptchaService;
 import io.healthresetplan.modules.sms.SmsVerificationService;
-import io.healthresetplan.modules.sync.KeyRetentionService;
+import io.healthresetplan.modules.data.UserDataService;
+import io.healthresetplan.modules.files.FileStorageService;
 import io.healthresetplan.modules.user.entity.UserAccount;
 import io.healthresetplan.modules.user.entity.UserCredential;
 import io.healthresetplan.modules.user.entity.UserSession;
 import io.healthresetplan.modules.user.mapper.UserAccountMapper;
 import io.healthresetplan.modules.user.mapper.UserCredentialMapper;
-import io.healthresetplan.modules.user.mapper.UserKeyMetaMapper;
 import io.healthresetplan.modules.user.mapper.UserSessionMapper;
-import io.healthresetplan.modules.user.entity.UserKeyMeta;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -49,36 +48,39 @@ public class AuthService {
     private final UserAccountMapper accountMapper;
     private final UserCredentialMapper credentialMapper;
     private final UserSessionMapper sessionMapper;
-    private final UserKeyMetaMapper keyMetaMapper;
-    private final KeyRetentionService keyRetentionService;
+    private final UserDataService userDataService;
+    private final FileStorageService fileStorageService;
     private final JwtUtils jwtUtils;
     private final JwtProperties jwtProperties;
     private final SmsVerificationService smsVerificationService;
     private final PhoneRegistrationTicketService registrationTicketService;
     private final PasswordLoginThrottleService passwordLoginThrottleService;
+    private final CaptchaService captchaService;
     private final JdbcTemplate jdbc;
 
     public AuthService(UserAccountMapper accountMapper,
                        UserCredentialMapper credentialMapper,
                        UserSessionMapper sessionMapper,
-                       UserKeyMetaMapper keyMetaMapper,
-                       KeyRetentionService keyRetentionService,
+                       UserDataService userDataService,
+                       FileStorageService fileStorageService,
                        JwtUtils jwtUtils,
                        JwtProperties jwtProperties,
                        SmsVerificationService smsVerificationService,
                        PhoneRegistrationTicketService registrationTicketService,
                        PasswordLoginThrottleService passwordLoginThrottleService,
+                       CaptchaService captchaService,
                        JdbcTemplate jdbc) {
         this.accountMapper = accountMapper;
         this.credentialMapper = credentialMapper;
         this.sessionMapper = sessionMapper;
-        this.keyMetaMapper = keyMetaMapper;
-        this.keyRetentionService = keyRetentionService;
+        this.userDataService = userDataService;
+        this.fileStorageService = fileStorageService;
         this.jwtUtils = jwtUtils;
         this.jwtProperties = jwtProperties;
         this.smsVerificationService = smsVerificationService;
         this.registrationTicketService = registrationTicketService;
         this.passwordLoginThrottleService = passwordLoginThrottleService;
+        this.captchaService = captchaService;
         this.jdbc = jdbc;
     }
 
@@ -146,6 +148,7 @@ public class AuthService {
     public PasswordResetCodeResponse sendSmsLoginCode(SmsLoginCodeRequest req) {
         String phone = normalizePhone(req.getPhone());
         validatePhone(phone);
+        captchaService.consumeLoginTicket(req.getCaptchaTicket(), phone);
         SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
                 SmsVerificationService.SCENE_AUTH,
                 phone
@@ -211,6 +214,7 @@ public class AuthService {
     public TokenResponse loginWithPhonePassword(PhonePasswordLoginRequest req, HttpServletRequest httpReq) {
         String phone = normalizePhone(req.getPhone());
         validatePhone(phone);
+        captchaService.consumeLoginTicket(req.getCaptchaTicket(), phone);
         String ip = nullToEmpty(resolveClientIp(httpReq));
         passwordLoginThrottleService.check(phone, ip);
         UserCredential credential = findCredential("phone", phone);
@@ -299,7 +303,9 @@ public class AuthService {
             throw new BusinessException(40401, "账号不存在");
         }
         if (account.getStatus() != null && account.getStatus() == -1) {
-            keyRetentionService.startRetentionForAccount(userId);
+            userDataService.delete(userId);
+            deleteAvatar(account, userId);
+            deleteUserRows(userId);
             return;
         }
 
@@ -313,43 +319,9 @@ public class AuthService {
         sessionMapper.delete(new LambdaQueryWrapper<UserSession>()
                 .eq(UserSession::getUserId, userId));
 
-        keyRetentionService.startRetentionForAccount(userId);
-    }
-
-    @Transactional
-    public TokenResponse reactivateAccount(AccountRecoveryRequest req, HttpServletRequest httpReq) {
-        String phone = normalizeIdentifier("phone", req.getPhone());
-        smsVerificationService.verifyPhoneCode(
-                SmsVerificationService.SCENE_ACCOUNT_RECOVERY, phone, req.getCode());
-
-        UserCredential credential = findCredential("phone", phone);
-        if (credential == null) {
-            throw new BusinessException(40401, "账号不存在");
-        }
-        UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
-                .eq(UserAccount::getUserId, credential.getUserId()));
-        if (account == null || account.getStatus() == null || account.getStatus() != -1) {
-            throw new BusinessException(40003, "该账号不在可恢复状态");
-        }
-
-        UserKeyMeta key = keyMetaMapper.selectOne(new LambdaQueryWrapper<UserKeyMeta>()
-                .eq(UserKeyMeta::getUserId, account.getUserId())
-                .eq(UserKeyMeta::getPublicFinger, req.getKeyFingerprint().toLowerCase())
-                .eq(UserKeyMeta::getPurgeStatus, "retaining")
-                .gt(UserKeyMeta::getRetentionUntil, LocalDateTime.now())
-                .last("LIMIT 1"));
-        if (key == null) {
-            throw new BusinessException(40301, "助记词不匹配或数据保留期已结束");
-        }
-
-        LocalDateTime now = LocalDateTime.now();
-        accountMapper.update(null, new LambdaUpdateWrapper<UserAccount>()
-                .eq(UserAccount::getUserId, account.getUserId())
-                .set(UserAccount::getStatus, 1)
-                .set(UserAccount::getHasCloudSync, 1)
-                .set(UserAccount::getUpdatedAt, now));
-        keyRetentionService.markUsed(account.getUserId(), req.getKeyFingerprint().toLowerCase());
-        return buildTokensAndSession(account.getUserId(), httpReq);
+        userDataService.delete(userId);
+        deleteAvatar(account, userId);
+        deleteUserRows(userId);
     }
 
     public PasswordResetCodeResponse sendPasswordResetCode(PasswordResetCodeRequest req) {
@@ -367,17 +339,6 @@ public class AuthService {
                 SmsVerificationService.SCENE_PASSWORD_RESET,
                 identifier
         );
-        return new PasswordResetCodeResponse(result.debugCode(), result.expiresIn());
-    }
-
-    public PasswordResetCodeResponse sendAccountRecoveryCode(String phone) {
-        String normalizedPhone = normalizeIdentifier("phone", phone);
-        UserCredential credential = findCredential("phone", normalizedPhone);
-        if (credential == null) {
-            return new PasswordResetCodeResponse("", 600);
-        }
-        SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
-                SmsVerificationService.SCENE_ACCOUNT_RECOVERY, normalizedPhone);
         return new PasswordResetCodeResponse(result.debugCode(), result.expiresIn());
     }
 
@@ -514,6 +475,31 @@ public class AuthService {
         credentialMapper.insert(credential);
 
         return userId;
+    }
+
+    private void deleteUserRows(String userId) {
+        String[] tables = {
+                "ai_conversation", "ai_user_consent", "client_event", "clock_record",
+                "device_binding", "feedback", "health_indicator", "health_report",
+                "payment_order", "plan_record", "reminder_event", "reminder_rule",
+                "user_device", "user_profile", "user_registration_consent",
+                "user_session", "user_subscription", "user_credential"
+        };
+        for (String table : tables) {
+            jdbc.update("DELETE FROM " + table + " WHERE user_id = ?", userId);
+        }
+        jdbc.update("DELETE FROM audit_log WHERE actor_type = 'user' AND actor_id = ?", userId);
+        jdbc.update("DELETE FROM user_account WHERE user_id = ?", userId);
+    }
+
+    private void deleteAvatar(UserAccount account, String userId) {
+        String value = account.getAvatarUrl();
+        if (value == null) return;
+        int marker = value.indexOf("objectKey=");
+        if (marker < 0) return;
+        String objectKey = java.net.URLDecoder.decode(
+                value.substring(marker + "objectKey=".length()), java.nio.charset.StandardCharsets.UTF_8);
+        fileStorageService.delete(objectKey, userId);
     }
 
     private static String nullToEmpty(String value) {

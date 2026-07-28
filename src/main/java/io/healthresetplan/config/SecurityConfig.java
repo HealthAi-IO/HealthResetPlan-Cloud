@@ -93,7 +93,6 @@ public class SecurityConfig {
                                 "/api/v1/auth/**",
                                 "/api/v1/releases/check",
                                 "/api/v1/releases/latest",
-                                "/api/v1/files/avatar/**",         // 头像公开可读
                                 "/api/v1/health",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",

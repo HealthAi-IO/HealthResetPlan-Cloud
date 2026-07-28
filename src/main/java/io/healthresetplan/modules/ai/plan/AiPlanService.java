@@ -83,7 +83,7 @@ public class AiPlanService {
 
     public AiPlanResponse generate(String userId, AiPlanRequest req) {
         validateProfile(req);
-        if (!membershipService.hasFeature(userId, "cloud_sync")) {
+        if (userId == null || userId.isBlank()) {
             throw new BusinessException(40301, "请先登录手机号账号");
         }
         String safetyReply = MedicalRiskGuard.safetyReply(buildUserMessage(req));
