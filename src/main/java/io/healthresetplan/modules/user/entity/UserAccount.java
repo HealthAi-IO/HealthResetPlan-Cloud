@@ -28,6 +28,7 @@ public class UserAccount {
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime cancellationRequestedAt;
 
     @TableLogic(value = "NULL", delval = "NOW(3)")
     @TableField(updateStrategy = FieldStrategy.IGNORED)
@@ -70,6 +71,11 @@ public class UserAccount {
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+
+    public LocalDateTime getCancellationRequestedAt() { return cancellationRequestedAt; }
+    public void setCancellationRequestedAt(LocalDateTime cancellationRequestedAt) {
+        this.cancellationRequestedAt = cancellationRequestedAt;
+    }
 
     public LocalDateTime getDeletedAt() { return deletedAt; }
     public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }

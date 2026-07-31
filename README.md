@@ -29,6 +29,7 @@ http://localhost:8080/api/v1/health
 | `DB_USERNAME` / `DB_PASSWORD` | MySQL 凭据 |
 | `REDIS_HOST` / `REDIS_PORT` | Redis 主机 |
 | `JWT_SECRET` | JWT 签名密钥 |
+| `ADMIN_BOOTSTRAP_PASSWORD` | 没有可用超级管理员时使用的一次性初始密码，至少 12 位；绑定 TOTP 后立即从环境中删除 |
 | `SMS_ENABLED` | 是否启用真实短信发送，生产环境填 `true` |
 | `SMS_DEBUG_CODE_ENABLED` | 是否在接口响应中返回调试验证码，生产环境必须为 `false` |
 | `JDCLOUD_ACCESS_KEY_ID` / `JDCLOUD_SECRET_ACCESS_KEY` | 京东云访问密钥 |

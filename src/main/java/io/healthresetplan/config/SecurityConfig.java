@@ -55,6 +55,11 @@ public class SecurityConfig {
                                 "/api/v1/admin/auth/logout"
                         ).permitAll()
                         .requestMatchers(
+                                "/api/v1/admin/auth/me",
+                                "/api/v1/admin/auth/totp/setup",
+                                "/api/v1/admin/auth/totp/enable"
+                        ).authenticated()
+                        .requestMatchers(
                                 "/api/v1/admin/system/admins/**",
                                 "/api/v1/admin/system/roles"
                         ).hasRole("SUPER_ADMIN")

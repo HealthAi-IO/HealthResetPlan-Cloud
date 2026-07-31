@@ -88,17 +88,24 @@ public class OneApiService {
         Map<String, OneApiProperties.ProviderConfig> configs = new HashMap<>(props.getProviders());
         try {
             jdbc.queryForList("""
-                    SELECT provider, base_url, model, api_key_cipher
+                    SELECT provider, base_url, model
                     FROM ai_provider_config
                     WHERE deleted_at IS NULL
                       AND status = 1
-                      AND api_key_cipher <> ''
                     """).forEach(row -> {
+                String provider = text(row.get("provider"));
+                OneApiProperties.ProviderConfig environmentConfig = configs.get(provider);
+                if (environmentConfig == null || environmentConfig.getApiKey() == null
+                        || environmentConfig.getApiKey().isBlank()) {
+                    return;
+                }
                 OneApiProperties.ProviderConfig cfg = new OneApiProperties.ProviderConfig();
-                cfg.setBaseUrl(text(row.get("base_url")));
-                cfg.setApiKey(text(row.get("api_key_cipher")));
-                cfg.setModel(text(row.get("model")));
-                configs.put(text(row.get("provider")), cfg);
+                String baseUrl = text(row.get("base_url"));
+                String model = text(row.get("model"));
+                cfg.setBaseUrl(baseUrl.isBlank() ? environmentConfig.getBaseUrl() : baseUrl);
+                cfg.setApiKey(environmentConfig.getApiKey());
+                cfg.setModel(model.isBlank() ? environmentConfig.getModel() : model);
+                configs.put(provider, cfg);
             });
         } catch (Exception e) {
             log.warn("Load AI providers from database failed, fallback to application config: {}", e.getMessage());

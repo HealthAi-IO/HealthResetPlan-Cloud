@@ -8,6 +8,6 @@ public record AdminTokenResponse(
         String username,
         String nickname,
         String roleCode,
-        String permissions
+        String permissions,
+        boolean totpEnabled
 ) {}
-

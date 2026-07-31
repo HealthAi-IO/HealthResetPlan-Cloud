@@ -40,6 +40,6 @@ public class PasswordLoginThrottleService {
     }
 
     private String key(String phone, String ip) {
-        return PREFIX + HashUtils.sha256Hex(phone + "|" + ip);
+        return PREFIX + HashUtils.sha256Hex(phone);
     }
 }

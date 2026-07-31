@@ -101,4 +101,17 @@ public class AuthController {
         return R.ok(authService.sendCancelAccountCode(userId, req.getPhone()));
     }
 
+    @PostMapping("/account-recovery/send-code")
+    public R<PasswordResetCodeResponse> sendAccountRecoveryCode(
+            @Valid @RequestBody CancelAccountCodeRequest req) {
+        return R.ok(authService.sendAccountRecoveryCode(req.getPhone()));
+    }
+
+    @PostMapping("/account-recovery/reactivate")
+    public R<TokenResponse> reactivateAccount(
+            @Valid @RequestBody CancelAccountRequest req,
+            HttpServletRequest httpReq) {
+        return R.ok(authService.reactivateAccount(req.getPhone(), req.getCode(), httpReq));
+    }
+
 }

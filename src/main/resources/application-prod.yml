@@ -21,6 +21,8 @@ springdoc:
     enabled: false
 
 app:
+  admin:
+    bootstrap-password: ${ADMIN_BOOTSTRAP_PASSWORD:}
   data-encryption:
     key: ${DATA_ENCRYPTION_KEY}
     key-version: ${DATA_ENCRYPTION_KEY_VERSION:1}
@@ -80,3 +82,6 @@ logging:
   level:
     root: INFO
     io.healthresetplan: INFO
+
+server:
+  forward-headers-strategy: framework

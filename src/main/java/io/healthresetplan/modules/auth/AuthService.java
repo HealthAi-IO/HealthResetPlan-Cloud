@@ -44,6 +44,7 @@ import java.time.ZoneId;
 public class AuthService {
 
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder();
+    static final int CANCELLATION_RETENTION_DAYS = 30;
 
     private final UserAccountMapper accountMapper;
     private final UserCredentialMapper credentialMapper;
@@ -137,9 +138,7 @@ public class AuthService {
 
         UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
                 .eq(UserAccount::getUserId, credential.getUserId()));
-        if (account == null || account.getStatus() != 1) {
-            throw new BusinessException(40301, "账号已被禁用或注销");
-        }
+        requireActiveAccount(account);
 
         backfillPhoneTail(account, req.getCredType(), req.getIdentifier());
         return buildTokensAndSession(credential.getUserId(), httpReq);
@@ -244,9 +243,7 @@ public class AuthService {
 
         UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
                 .eq(UserAccount::getUserId, credential.getUserId()));
-        if (account == null || account.getStatus() != 1) {
-            throw new BusinessException(40301, "账号已被禁用或注销");
-        }
+        requireActiveAccount(account);
         backfillPhoneTail(account, "phone", phone);
 
         return buildTokensAndSession(credential.getUserId(), httpReq);
@@ -303,9 +300,6 @@ public class AuthService {
             throw new BusinessException(40401, "账号不存在");
         }
         if (account.getStatus() != null && account.getStatus() == -1) {
-            userDataService.delete(userId);
-            deleteAvatar(account, userId);
-            deleteUserRows(userId);
             return;
         }
 
@@ -313,12 +307,53 @@ public class AuthService {
         accountMapper.update(null, new LambdaUpdateWrapper<UserAccount>()
                 .eq(UserAccount::getUserId, userId)
                 .set(UserAccount::getStatus, -1)
-                .set(UserAccount::getHasCloudSync, 0)
+                .set(UserAccount::getCancellationRequestedAt, now)
                 .set(UserAccount::getUpdatedAt, now));
 
         sessionMapper.delete(new LambdaQueryWrapper<UserSession>()
                 .eq(UserSession::getUserId, userId));
+    }
 
+    public PasswordResetCodeResponse sendAccountRecoveryCode(String phone) {
+        String normalizedPhone = normalizeIdentifier("phone", phone);
+        validatePhone(normalizedPhone);
+        UserAccount account = requireRecoverableCancelledAccount(normalizedPhone);
+        SmsVerificationService.SendCodeResult result = smsVerificationService.sendPhoneCode(
+                SmsVerificationService.SCENE_ACCOUNT_RECOVERY, normalizedPhone);
+        return new PasswordResetCodeResponse(result.debugCode(), result.expiresIn());
+    }
+
+    @Transactional
+    public TokenResponse reactivateAccount(
+            String phone,
+            String code,
+            HttpServletRequest httpReq) {
+        String normalizedPhone = normalizeIdentifier("phone", phone);
+        validatePhone(normalizedPhone);
+        UserAccount account = requireRecoverableCancelledAccount(normalizedPhone);
+        smsVerificationService.verifyPhoneCode(
+                SmsVerificationService.SCENE_ACCOUNT_RECOVERY, normalizedPhone, code);
+
+        LocalDateTime now = LocalDateTime.now();
+        accountMapper.update(null, new LambdaUpdateWrapper<UserAccount>()
+                .eq(UserAccount::getUserId, account.getUserId())
+                .eq(UserAccount::getStatus, -1)
+                .set(UserAccount::getStatus, 1)
+                .set(UserAccount::getCancellationRequestedAt, null)
+                .set(UserAccount::getUpdatedAt, now));
+        return buildTokensAndSession(account.getUserId(), httpReq);
+    }
+
+    @Transactional
+    public void purgeExpiredCancellation(String userId, LocalDateTime cutoff) {
+        UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
+                .eq(UserAccount::getUserId, userId));
+        if (account == null
+                || !Integer.valueOf(-1).equals(account.getStatus())
+                || account.getCancellationRequestedAt() == null
+                || account.getCancellationRequestedAt().isAfter(cutoff)) {
+            return;
+        }
         userDataService.delete(userId);
         deleteAvatar(account, userId);
         deleteUserRows(userId);
@@ -392,9 +427,7 @@ public class AuthService {
     private TokenResponse buildTokensAndSession(String userId, HttpServletRequest httpReq) {
         UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
                 .eq(UserAccount::getUserId, userId));
-        if (account == null || !Integer.valueOf(1).equals(account.getStatus())) {
-            throw new BusinessException(40301, "账号已被禁用或注销");
-        }
+        requireActiveAccount(account);
 
         String accessToken = jwtUtils.generateAccessToken(userId);
         String refreshToken = jwtUtils.generateRefreshToken(userId);
@@ -432,6 +465,41 @@ public class AuthService {
         UserCredential credential = findCredential("phone", phone);
         if (credential == null || !credential.getUserId().equals(userId)) {
             throw new BusinessException(40003, "手机号与当前账号不匹配");
+        }
+    }
+
+    private UserAccount requireRecoverableCancelledAccount(String phone) {
+        UserCredential credential = findCredential("phone", phone);
+        if (credential == null) {
+            throw new BusinessException(40401, "没有可恢复的账号");
+        }
+        UserAccount account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
+                .eq(UserAccount::getUserId, credential.getUserId()));
+        if (account == null || !Integer.valueOf(-1).equals(account.getStatus())) {
+            throw new BusinessException(40401, "没有可恢复的账号");
+        }
+        LocalDateTime requestedAt = account.getCancellationRequestedAt();
+        if (requestedAt == null
+                || requestedAt.plusDays(CANCELLATION_RETENTION_DAYS).isBefore(LocalDateTime.now())) {
+            throw new BusinessException(40303, "账号恢复期已结束");
+        }
+        return account;
+    }
+
+    private void requireActiveAccount(UserAccount account) {
+        if (account == null) {
+            throw new BusinessException(40301, "账号不可用");
+        }
+        if (Integer.valueOf(-1).equals(account.getStatus())) {
+            LocalDateTime requestedAt = account.getCancellationRequestedAt();
+            if (requestedAt != null
+                    && !requestedAt.plusDays(CANCELLATION_RETENTION_DAYS).isBefore(LocalDateTime.now())) {
+                throw new BusinessException(40302, "账号处于恢复期");
+            }
+            throw new BusinessException(40303, "账号恢复期已结束");
+        }
+        if (!Integer.valueOf(1).equals(account.getStatus())) {
+            throw new BusinessException(40301, "账号已被禁用");
         }
     }
 
@@ -480,10 +548,9 @@ public class AuthService {
     private void deleteUserRows(String userId) {
         String[] tables = {
                 "ai_conversation", "ai_user_consent", "client_event", "clock_record",
-                "device_binding", "feedback", "health_indicator", "health_report",
-                "payment_order", "plan_record", "reminder_event", "reminder_rule",
-                "user_device", "user_profile", "user_registration_consent",
-                "user_session", "user_subscription", "user_credential"
+                "feedback", "health_indicator", "health_report", "plan_record",
+                "reminder_event", "reminder_rule", "user_profile",
+                "user_registration_consent", "user_session", "user_credential"
         };
         for (String table : tables) {
             jdbc.update("DELETE FROM " + table + " WHERE user_id = ?", userId);

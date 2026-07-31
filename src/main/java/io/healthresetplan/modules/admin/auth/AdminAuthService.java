@@ -30,29 +30,36 @@ public class AdminAuthService {
     private final JwtUtils jwtUtils;
     private final JwtProperties jwtProperties;
     private final TotpVerifier totpVerifier;
+    private final AdminLoginThrottleService loginThrottle;
 
     public AdminAuthService(JdbcTemplate jdbc,
                             JwtUtils jwtUtils,
                             JwtProperties jwtProperties,
-                            TotpVerifier totpVerifier) {
+                            TotpVerifier totpVerifier,
+                            AdminLoginThrottleService loginThrottle) {
         this.jdbc = jdbc;
         this.jwtUtils = jwtUtils;
         this.jwtProperties = jwtProperties;
         this.totpVerifier = totpVerifier;
+        this.loginThrottle = loginThrottle;
     }
 
     @Transactional
     public AdminTokenResponse login(AdminLoginRequest request, HttpServletRequest httpRequest) {
+        loginThrottle.check(request.getUsername());
         Map<String, Object> admin = findByUsername(request.getUsername());
         if (admin.isEmpty() || !BCRYPT.matches(request.getPassword(), text(admin.get("password_hash")))) {
+            loginThrottle.recordFailure(request.getUsername());
             throw new BusinessException(40101, "账号或密码错误");
         }
         if (number(admin.get("status")) != 1) {
             throw new BusinessException(40301, "管理员账号已被禁用");
         }
         if (!totpVerifier.verify(text(admin.get("totp_secret")), request.getTotpCode())) {
+            loginThrottle.recordFailure(request.getUsername());
             throw new BusinessException(40103, "动态验证码错误");
         }
+        loginThrottle.clear(request.getUsername());
 
         long adminId = number(admin.get("id"));
         jdbc.update("""
@@ -209,7 +216,8 @@ public class AdminAuthService {
                 text(admin.get("username")),
                 text(admin.get("nickname")),
                 roleCode,
-                text(admin.get("permissions"))
+                text(admin.get("permissions")),
+                !text(admin.get("totp_secret")).isBlank()
         );
     }
 

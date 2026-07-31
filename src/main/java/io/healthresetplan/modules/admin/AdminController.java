@@ -168,38 +168,18 @@ public class AdminController {
                   GROUP BY us.user_id
                 ),
                 indicator_stats AS (
-                  SELECT agg_source.user_id, SUM(agg_source.row_count) AS indicator_count
-                  FROM (
-                    SELECT hi.user_id, COUNT(*) AS row_count
-                    FROM health_indicator hi
-                    JOIN page_users pu ON pu.user_id = hi.user_id
-                    WHERE hi.deleted_at IS NULL
-                    GROUP BY hi.user_id
-                    UNION ALL
-                    SELECT sr.user_id, COUNT(*) AS row_count
-                    FROM sync_record sr
-                    JOIN page_users pu ON pu.user_id = sr.user_id
-                    WHERE sr.table_name = 'health_indicator' AND sr.deleted_at IS NULL
-                    GROUP BY sr.user_id
-                  ) agg_source
-                  GROUP BY agg_source.user_id
+                  SELECT hi.user_id, COUNT(*) AS indicator_count
+                  FROM health_indicator hi
+                  JOIN page_users pu ON pu.user_id = hi.user_id
+                  WHERE hi.deleted_at IS NULL
+                  GROUP BY hi.user_id
                 ),
                 report_stats AS (
-                  SELECT agg_source.user_id, SUM(agg_source.row_count) AS report_count
-                  FROM (
-                    SELECT hr.user_id, COUNT(*) AS row_count
-                    FROM health_report hr
-                    JOIN page_users pu ON pu.user_id = hr.user_id
-                    WHERE hr.deleted_at IS NULL
-                    GROUP BY hr.user_id
-                    UNION ALL
-                    SELECT sr.user_id, COUNT(*) AS row_count
-                    FROM sync_record sr
-                    JOIN page_users pu ON pu.user_id = sr.user_id
-                    WHERE sr.table_name = 'health_report' AND sr.deleted_at IS NULL
-                    GROUP BY sr.user_id
-                  ) agg_source
-                  GROUP BY agg_source.user_id
+                  SELECT hr.user_id, COUNT(*) AS report_count
+                  FROM health_report hr
+                  JOIN page_users pu ON pu.user_id = hr.user_id
+                  WHERE hr.deleted_at IS NULL
+                  GROUP BY hr.user_id
                 )
                 SELECT
                   pu.user_id,
@@ -250,10 +230,8 @@ public class AdminController {
                   ua.created_at,
                   ua.updated_at,
                   (SELECT MAX(us.created_at) FROM user_session us WHERE us.user_id = ua.user_id) AS last_login_at,
-                  ((SELECT COUNT(*) FROM health_indicator hi WHERE hi.user_id = ua.user_id AND hi.deleted_at IS NULL)
-                   + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_indicator' AND sr.deleted_at IS NULL)) AS indicator_count,
-                  ((SELECT COUNT(*) FROM health_report hr WHERE hr.user_id = ua.user_id AND hr.deleted_at IS NULL)
-                   + (SELECT COUNT(*) FROM sync_record sr WHERE sr.user_id = ua.user_id AND sr.table_name = 'health_report' AND sr.deleted_at IS NULL)) AS report_count,
+                  (SELECT COUNT(*) FROM health_indicator hi WHERE hi.user_id = ua.user_id AND hi.deleted_at IS NULL) AS indicator_count,
+                  (SELECT COUNT(*) FROM health_report hr WHERE hr.user_id = ua.user_id AND hr.deleted_at IS NULL) AS report_count,
                    0 AS active_subscription_count,
                    NULL AS member_expires_at
                 FROM user_account ua
@@ -638,12 +616,11 @@ public class AdminController {
                   weight,
                   status,
                   qps_limit
-                ) VALUES (?, ?, ?, ?, '', '', ?, ?, ?)
+                ) VALUES (?, ?, ?, '', '', '', ?, ?, ?)
                 """,
                 provider,
                 normalizedText(payload.get("baseUrl")),
                 model,
-                normalizedText(payload.get("apiKey")),
                 intValue(payload.get("weight")),
                 booleanValue(payload.get("enabled")) ? 1 : 0,
                 intValue(payload.get("qpsLimit"))
@@ -686,17 +663,6 @@ public class AdminController {
                 intValue(payload.get("qpsLimit")),
                 providerId
         );
-
-        String apiKey = normalizedText(payload.get("apiKey"));
-        if (!apiKey.isBlank()) {
-            jdbc.update("""
-                    UPDATE ai_provider_config
-                    SET api_key_cipher = ?,
-                        api_key_iv = '',
-                        api_key_tag = ''
-                    WHERE id = ? AND deleted_at IS NULL
-                    """, apiKey, providerId);
-        }
 
         Map<String, Object> after = getProviderById(providerId);
         oneApiService.reloadClients();
@@ -1424,59 +1390,29 @@ public class AdminController {
     private List<Map<String, Object>> indicatorTypes(String userId) {
         if (userId == null || userId.isBlank()) {
             return jdbc.queryForList("""
-                    SELECT type, SUM(count) AS count
-                    FROM (
-                      SELECT type, COUNT(*) AS count
-                      FROM health_indicator
-                      WHERE deleted_at IS NULL
-                      GROUP BY type
-                      UNION ALL
-                      SELECT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(meta_json, '$.type')), ''), 'unknown') AS type,
-                             COUNT(*) AS count
-                      FROM sync_record
-                      WHERE table_name = 'health_indicator'
-                        AND deleted_at IS NULL
-                        AND NULLIF(JSON_UNQUOTE(JSON_EXTRACT(meta_json, '$.type')), '') IS NOT NULL
-                      GROUP BY type
-                    ) t
+                    SELECT type, COUNT(*) AS count
+                    FROM health_indicator
+                    WHERE deleted_at IS NULL
                     GROUP BY type
                     ORDER BY count DESC
                     LIMIT 12
                     """);
         }
         return jdbc.queryForList("""
-                SELECT type, SUM(count) AS count
-                FROM (
-                  SELECT type, COUNT(*) AS count
-                  FROM health_indicator
-                  WHERE deleted_at IS NULL AND user_id = ?
-                  GROUP BY type
-                  UNION ALL
-                  SELECT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(meta_json, '$.type')), ''), 'unknown') AS type,
-                         COUNT(*) AS count
-                  FROM sync_record
-                  WHERE table_name = 'health_indicator'
-                    AND deleted_at IS NULL
-                    AND user_id = ?
-                    AND NULLIF(JSON_UNQUOTE(JSON_EXTRACT(meta_json, '$.type')), '') IS NOT NULL
-                  GROUP BY type
-                ) t
+                SELECT type, COUNT(*) AS count
+                FROM health_indicator
+                WHERE deleted_at IS NULL AND user_id = ?
                 GROUP BY type
                 ORDER BY count DESC
                 LIMIT 12
-                """, userId, userId);
+                """, userId);
     }
 
     private long combinedSyncedCount(String tableName) {
         if (!"health_indicator".equals(tableName) && !"health_report".equals(tableName)) {
             return 0;
         }
-        long legacy = count("SELECT COUNT(*) FROM " + tableName + " WHERE deleted_at IS NULL");
-        long generic = count(
-                "SELECT COUNT(*) FROM sync_record WHERE table_name = ? AND deleted_at IS NULL",
-                tableName
-        );
-        return legacy + generic;
+        return count("SELECT COUNT(*) FROM " + tableName + " WHERE deleted_at IS NULL");
     }
 
     private long retention(LocalDateTime cohortDay, LocalDateTime returnDay) {
@@ -1985,22 +1921,28 @@ public class AdminController {
 
         jdbc.queryForList("""
                 SELECT
-                  COALESCE(
-                    NULLIF(us.platform, ''),
-                    CASE
-                      WHEN LOWER(us.user_agent) LIKE '%windows%' THEN 'windows'
-                      WHEN LOWER(us.user_agent) LIKE '%mac os%' OR LOWER(us.user_agent) LIKE '%macintosh%' THEN 'macos'
-                      WHEN LOWER(us.user_agent) LIKE '%android%' THEN 'android'
-                      WHEN LOWER(us.user_agent) LIKE '%iphone%' OR LOWER(us.user_agent) LIKE '%ipad%' OR LOWER(us.user_agent) LIKE '%ios%' THEN 'ios'
-                      WHEN LOWER(us.user_agent) LIKE '%micromessenger%' THEN 'wechat'
-                      ELSE 'web'
-                    END
-                  ) AS platform,
+                  normalized.platform,
                   COUNT(*) AS sessionCount,
-                  COUNT(DISTINCT us.user_id) AS activeUsers,
-                  MAX(us.created_at) AS lastSeenAt
-                FROM user_session us
-                GROUP BY platform
+                  COUNT(DISTINCT normalized.user_id) AS activeUsers,
+                  MAX(normalized.created_at) AS lastSeenAt
+                FROM (
+                  SELECT
+                    us.user_id,
+                    us.created_at,
+                    COALESCE(
+                      NULLIF(us.platform, ''),
+                      CASE
+                        WHEN LOWER(us.user_agent) LIKE '%windows%' THEN 'windows'
+                        WHEN LOWER(us.user_agent) LIKE '%mac os%' OR LOWER(us.user_agent) LIKE '%macintosh%' THEN 'macos'
+                        WHEN LOWER(us.user_agent) LIKE '%android%' THEN 'android'
+                        WHEN LOWER(us.user_agent) LIKE '%iphone%' OR LOWER(us.user_agent) LIKE '%ipad%' OR LOWER(us.user_agent) LIKE '%ios%' THEN 'ios'
+                        WHEN LOWER(us.user_agent) LIKE '%micromessenger%' THEN 'wechat'
+                        ELSE 'web'
+                      END
+                    ) AS platform
+                  FROM user_session us
+                ) normalized
+                GROUP BY normalized.platform
                 """).forEach(row -> {
             String platform = stringValue(row.get("platform"));
             Map<String, Object> item = byPlatform.get(platform);
@@ -2085,7 +2027,6 @@ public class AdminController {
         String provider = normalizedText(payload.get("provider"));
         String baseUrl = normalizedText(payload.get("baseUrl"));
         String model = normalizedText(payload.get("model"));
-        String apiKey = normalizedText(payload.get("apiKey"));
         int weight = intValue(payload.get("weight"));
         int qpsLimit = intValue(payload.get("qpsLimit"));
         if (provider.isBlank()) {
@@ -2096,9 +2037,6 @@ public class AdminController {
         }
         if (model.isBlank()) {
             throw new IllegalArgumentException("model 不能为空");
-        }
-        if (createMode && apiKey.isBlank()) {
-            throw new IllegalArgumentException("apiKey 不能为空");
         }
         if (weight < 0 || weight > 1000) {
             throw new IllegalArgumentException("weight 必须在 0 到 1000 之间");

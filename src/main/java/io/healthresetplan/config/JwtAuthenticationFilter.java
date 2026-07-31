@@ -84,7 +84,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT a.id, a.role_code, COALESCE(r.permissions, '') AS permissions
+                SELECT a.id, a.role_code, a.totp_secret,
+                       COALESCE(r.permissions, '') AS permissions
                 FROM admin_account a
                 LEFT JOIN admin_role r ON r.code = a.role_code
                 WHERE a.id = ? AND a.status = 1 AND a.deleted_at IS NULL
@@ -93,6 +94,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String roleCode = String.valueOf(rows.get(0).get("role_code"));
         List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+            Object totpValue = rows.get(0).get("totp_secret");
+            String totpSecret = totpValue == null ? "" : String.valueOf(totpValue);
+        if (totpSecret.isBlank()) {
+            authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN_SETUP"));
+            SecurityContextHolder.getContext().setAuthentication(
+                    new UsernamePasswordAuthenticationToken(
+                            "admin:" + adminId, null, authorities));
+            return;
+        }
         authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
         authorities.add(new SimpleGrantedAuthority(
                 "ROLE_" + roleCode.toUpperCase(Locale.ROOT)));
