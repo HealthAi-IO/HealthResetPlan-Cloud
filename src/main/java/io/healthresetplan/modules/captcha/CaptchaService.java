@@ -3,17 +3,15 @@ package io.healthresetplan.modules.captcha;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.common.persistence.ExpiringStateStore;
 import io.healthresetplan.common.util.HashUtils;
 import io.healthresetplan.modules.captcha.dto.CaptchaCreateRequest;
 import io.healthresetplan.modules.captcha.dto.CaptchaCreateResponse;
 import io.healthresetplan.modules.captcha.dto.CaptchaVerifyRequest;
 import io.healthresetplan.modules.captcha.dto.CaptchaVerifyResponse;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -24,21 +22,16 @@ public class CaptchaService {
     private static final Duration TICKET_TTL = Duration.ofSeconds(120);
     private static final String CAPTCHA_PREFIX = "captcha:challenge:";
     private static final String TICKET_PREFIX = "captcha:ticket:";
-    private static final DefaultRedisScript<String> GET_AND_DELETE = new DefaultRedisScript<>(
-            "local value = redis.call('GET', KEYS[1]); "
-                    + "if value then redis.call('DEL', KEYS[1]); end; return value;",
-            String.class);
-
-    private final StringRedisTemplate redis;
+    private final ExpiringStateStore stateStore;
     private final ObjectMapper objectMapper;
     private final CaptchaImageGenerator imageGenerator;
     private final CaptchaTrajectoryValidator trajectoryValidator;
 
-    public CaptchaService(StringRedisTemplate redis,
+    public CaptchaService(ExpiringStateStore stateStore,
                           ObjectMapper objectMapper,
                           CaptchaImageGenerator imageGenerator,
                           CaptchaTrajectoryValidator trajectoryValidator) {
-        this.redis = redis;
+        this.stateStore = stateStore;
         this.objectMapper = objectMapper;
         this.imageGenerator = imageGenerator;
         this.trajectoryValidator = trajectoryValidator;
@@ -53,7 +46,7 @@ public class CaptchaService {
                 HashUtils.sha256Hex(principal),
                 generated.targetX(),
                 System.currentTimeMillis());
-        redis.opsForValue().set(CAPTCHA_PREFIX + captchaId, write(state), CAPTCHA_TTL);
+        stateStore.put(CAPTCHA_PREFIX + captchaId, write(state), CAPTCHA_TTL);
         return new CaptchaCreateResponse(
                 captchaId,
                 generated.backgroundImageBase64(),
@@ -85,7 +78,7 @@ public class CaptchaService {
 
         String ticket = randomToken();
         TicketState ticketState = new TicketState(state.scene(), state.principalHash());
-        redis.opsForValue().set(TICKET_PREFIX + ticket, write(ticketState), TICKET_TTL);
+        stateStore.put(TICKET_PREFIX + ticket, write(ticketState), TICKET_TTL);
         return new CaptchaVerifyResponse(ticket, TICKET_TTL.toSeconds());
     }
 
@@ -120,7 +113,7 @@ public class CaptchaService {
     }
 
     private String consume(String key) {
-        return redis.execute(GET_AND_DELETE, List.of(key));
+        return stateStore.take(key);
     }
 
     private String randomToken() {

@@ -27,7 +27,6 @@ http://localhost:8080/api/v1/health
 | 变量 | 说明 |
 | --- | --- |
 | `DB_USERNAME` / `DB_PASSWORD` | MySQL 凭据 |
-| `REDIS_HOST` / `REDIS_PORT` | Redis 主机 |
 | `JWT_SECRET` | JWT 签名密钥 |
 | `ADMIN_BOOTSTRAP_PASSWORD` | 没有可用超级管理员时使用的一次性初始密码，至少 12 位；绑定 TOTP 后立即从环境中删除 |
 | `SMS_ENABLED` | 是否启用真实短信发送，生产环境填 `true` |
@@ -38,6 +37,8 @@ http://localhost:8080/api/v1/health
 | `SMS_MAX_PER_PHONE_PER_HOUR` / `SMS_MAX_PER_PHONE_PER_DAY` | 单手机号每小时 / 每日发送上限 |
 | `AI_CHAT_QWEN_API_KEY` / `AI_CHAT_VOLCENGINE_API_KEY` | 千问 / 火山方舟 Key |
 | `AI_CHAT_QWEN_API_BASE` / `AI_CHAT_DOUBAO_API_BASE` / `AI_CHAT_GLM_API_BASE` / `AI_CHAT_DEEPSEEK_API_BASE` | AI 厂商 OpenAI 兼容接口地址 |
+
+验证码、登录限流、注册票据和 AI 使用额度统一存储在 MySQL，无需部署 Redis。
 | `AI_CHAT_QWEN_MODEL` / `AI_CHAT_DOUBAO_MODEL` / `AI_CHAT_GLM_MODEL` / `AI_CHAT_DEEPSEEK_MODEL` | AI 模型名称或接入点 ID |
 | `AI_PLAN_CACHE_MINUTES` | 7 天健康规划缓存分钟数，默认 30 |
 | `AI_PLAN_MAX_COMPLETION_TOKENS` | 7 天健康规划最大输出 token，默认 4096 |
@@ -69,7 +70,7 @@ GET /api/v1/releases/check
 
 ## 短信验证码
 
-密码重置接口 `/api/v1/auth/password-reset/send-code` 已接入 Redis 验证码缓存和手机号防刷限流。
+密码重置接口 `/api/v1/auth/password-reset/send-code` 已接入 MySQL 验证码状态和手机号防刷限流。
 
 京东云短信 SDK 调用代码已预写在 `src/main/java/io/healthresetplan/modules/sms/JdcloudSmsSender.java`。备案和短信签名/模板审核通过后，生产环境填入：
 

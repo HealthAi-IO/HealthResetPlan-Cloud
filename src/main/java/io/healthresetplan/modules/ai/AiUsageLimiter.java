@@ -1,7 +1,7 @@
 package io.healthresetplan.modules.ai;
 
 import io.healthresetplan.common.exception.BusinessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import io.healthresetplan.common.persistence.ExpiringStateStore;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -31,34 +31,31 @@ public class AiUsageLimiter {
         }
     }
 
-    private final StringRedisTemplate redis;
+    private final ExpiringStateStore stateStore;
 
-    public AiUsageLimiter(StringRedisTemplate redis) {
-        this.redis = redis;
+    public AiUsageLimiter(ExpiringStateStore stateStore) {
+        this.stateStore = stateStore;
     }
 
     public void consume(String userId, Type type) {
         String key = key(userId, type);
-        Long used = redis.opsForValue().increment(key);
-        if (used != null && used == 1) {
-            redis.expire(key, Duration.ofDays(2));
-        }
-        if (used != null && used > type.limit) {
-            redis.opsForValue().decrement(key);
+        long used = stateStore.increment(key, 1, Duration.ofDays(2));
+        if (used > type.limit) {
+            stateStore.increment(key, -1, Duration.ofDays(2));
             throw new BusinessException(42901, "今日" + label(type) + "次数已达上限（" + type.limit + " 次）");
         }
     }
 
     public void release(String userId, Type type) {
         String key = key(userId, type);
-        Long used = redis.opsForValue().decrement(key);
-        if (used != null && used <= 0) {
-            redis.delete(key);
+        long used = stateStore.increment(key, -1, Duration.ofDays(2));
+        if (used <= 0) {
+            stateStore.delete(key);
         }
     }
 
     public long used(String userId, Type type) {
-        String value = redis.opsForValue().get(key(userId, type));
+        String value = stateStore.get(key(userId, type));
         return value == null ? 0 : Long.parseLong(value);
     }
 

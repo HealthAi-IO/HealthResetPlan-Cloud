@@ -4,11 +4,6 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
-  data:
-    redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD}
   flyway:
     enabled: true
     baseline-on-migrate: true
@@ -54,7 +49,7 @@ app:
       connect-timeout-millis: ${JDCLOUD_SMS_CONNECT_TIMEOUT_MILLIS:3000}
       read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
   ai:
-    chat-order: [qwen, doubao, glm, deepseek]
+    chat-order: [doubao, qwen, glm, deepseek]
     vision-provider: ${AI_CHAT_VISION_PROVIDER:qwen}
     daily-limit: ${AI_CHAT_DAILY_LIMIT:30}
     timeout-seconds: ${AI_CHAT_TIMEOUT_SECONDS:120}
@@ -63,15 +58,15 @@ app:
     providers:
       deepseek:
         base-url: ${AI_CHAT_DEEPSEEK_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
-        model: ${AI_CHAT_DEEPSEEK_MODEL:ep-20260721152104-szzhr}
+        model: ${AI_CHAT_DEEPSEEK_MODEL:deepseek-v4-pro-260425}
         api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
       doubao:
         base-url: ${AI_CHAT_DOUBAO_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
-        model: ${AI_CHAT_DOUBAO_MODEL:ep-20260721151735-7px4f}
+        model: ${AI_CHAT_DOUBAO_MODEL:doubao-seed-2-1-pro-260628}
         api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
       glm:
         base-url: ${AI_CHAT_GLM_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
-        model: ${AI_CHAT_GLM_MODEL:ep-20260721151959-wgsk4}
+        model: ${AI_CHAT_GLM_MODEL:glm-5-2-260617}
         api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
       qwen:
         base-url: ${AI_CHAT_QWEN_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}

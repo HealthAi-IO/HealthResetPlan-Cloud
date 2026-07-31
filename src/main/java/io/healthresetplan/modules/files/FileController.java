@@ -24,8 +24,11 @@ public class FileController {
     @PostMapping("/upload")
     public R<Map<String, String>> upload(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("clientId") String clientId) {
-        String objectKey = storageService.store(file, currentUserId(), clientId);
+            @RequestParam("clientId") String clientId,
+            @RequestParam(value = "kind", required = false) String kind) {
+        String objectKey = "image".equals(kind)
+                ? storageService.storeImage(file, currentUserId(), clientId)
+                : storageService.store(file, currentUserId(), clientId);
         return R.ok(Map.of("objectKey", objectKey));
     }
 

@@ -1,7 +1,7 @@
 package io.healthresetplan.modules.sms;
 
 import io.healthresetplan.common.exception.BusinessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import io.healthresetplan.common.persistence.ExpiringStateStore;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -13,11 +13,11 @@ public class SmsRateLimiter {
     private static final String HOURLY_PREFIX = "hrp:sms:limit:hour:";
     private static final String DAILY_PREFIX = "hrp:sms:limit:day:";
 
-    private final StringRedisTemplate redisTemplate;
+    private final ExpiringStateStore stateStore;
     private final SmsProperties properties;
 
-    public SmsRateLimiter(StringRedisTemplate redisTemplate, SmsProperties properties) {
-        this.redisTemplate = redisTemplate;
+    public SmsRateLimiter(ExpiringStateStore stateStore, SmsProperties properties) {
+        this.stateStore = stateStore;
         this.properties = properties;
     }
 
@@ -31,20 +31,16 @@ public class SmsRateLimiter {
 
     private void checkResendInterval(String phoneHash) {
         Duration interval = Duration.ofSeconds(properties.getResendIntervalSeconds());
-        Boolean firstSend = redisTemplate.opsForValue()
-                .setIfAbsent(INTERVAL_PREFIX + phoneHash, "1", interval);
-        if (Boolean.FALSE.equals(firstSend)) {
+        boolean firstSend = stateStore.putIfAbsent(INTERVAL_PREFIX + phoneHash, "1", interval);
+        if (!firstSend) {
             throw new BusinessException(42901,
                     properties.getResendIntervalSeconds() + " 秒内只能发送一次验证码");
         }
     }
 
     private void checkWindow(String key, int maxCount, Duration ttl, String message) {
-        Long count = redisTemplate.opsForValue().increment(key);
-        if (count != null && count == 1L) {
-            redisTemplate.expire(key, ttl);
-        }
-        if (count != null && count > maxCount) {
+        long count = stateStore.increment(key, 1, ttl);
+        if (count > maxCount) {
             throw new BusinessException(42901, message);
         }
     }

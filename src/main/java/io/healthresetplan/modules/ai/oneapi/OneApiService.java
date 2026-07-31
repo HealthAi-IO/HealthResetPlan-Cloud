@@ -24,9 +24,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -155,7 +153,7 @@ public class OneApiService {
             boolean jsonOutput) {
 
         boolean rateLimited = false;
-        for (String providerName : providerOrder(preferredProvider)) {
+        for (String providerName : providerSelection(preferredProvider)) {
             OpenAIClient client = clients.get(providerName);
             if (client == null) continue;
 
@@ -182,7 +180,7 @@ public class OneApiService {
             } catch (UnauthorizedException e) {
                 log.error("AI key unauthorized provider={}", providerName);
             } catch (Exception e) {
-                log.warn("AI provider={} unavailable, trying next", providerName);
+                log.warn("AI provider={} unavailable", providerName);
             }
         }
 
@@ -210,7 +208,7 @@ public class OneApiService {
             Runnable onDone) {
 
         boolean rateLimited = false;
-        for (String providerName : providerOrder(preferredProvider)) {
+        for (String providerName : providerSelection(preferredProvider)) {
             OpenAIClient client = clients.get(providerName);
             if (client == null) continue;
 
@@ -236,7 +234,7 @@ public class OneApiService {
             } catch (BusinessException e) {
                 throw e;
             } catch (Exception e) {
-                log.warn("AI stream provider={} unavailable, trying next", providerName);
+                log.warn("AI stream provider={} unavailable", providerName);
             }
         }
 
@@ -248,13 +246,13 @@ public class OneApiService {
 
     public VisionCompletion analyzeImage(String userId, String imageBase64, String mimeType, String prompt) {
         BusinessException lastError = null;
-        for (String providerName : providerOrder(props.getVisionProvider())) {
+        for (String providerName : providerSelection(props.getVisionProvider())) {
             if (!clients.containsKey(providerName)) continue;
             try {
                 String content = analyzeImageWithProvider(userId, imageBase64, mimeType, prompt, providerName);
                 if (!hasUsableVisionContent(content)) {
                     lastError = new BusinessException(50301, "OCR 模型返回空内容");
-                    log.warn("OCR provider={} returned empty content, trying next", providerName);
+                    log.warn("OCR provider={} returned empty content", providerName);
                     continue;
                 }
                 String model = providerConfigs.get(providerName).getModel();
@@ -264,7 +262,7 @@ public class OneApiService {
                     throw e;
                 }
                 lastError = e;
-                log.warn("OCR provider={} unavailable, trying next", providerName);
+                log.warn("OCR provider={} unavailable", providerName);
             }
         }
 
@@ -382,13 +380,13 @@ public class OneApiService {
                         .build());
     }
 
-    private List<String> providerOrder(String preferredProvider) {
-        LinkedHashSet<String> ordered = new LinkedHashSet<>();
+    List<String> providerSelection(String preferredProvider) {
         if (preferredProvider != null && !preferredProvider.isBlank()) {
-            ordered.add(preferredProvider.trim());
+            return List.of(preferredProvider.trim());
         }
-        ordered.addAll(props.getChatOrder());
-        return new ArrayList<>(ordered);
+        return props.getChatOrder().isEmpty()
+                ? List.of()
+                : List.of(props.getChatOrder().get(0));
     }
 
     private String text(Object value) {

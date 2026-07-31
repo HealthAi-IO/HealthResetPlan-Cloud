@@ -1,8 +1,8 @@
 package io.healthresetplan.modules.admin.auth;
 
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.common.persistence.ExpiringStateStore;
 import io.healthresetplan.common.util.HashUtils;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -14,14 +14,14 @@ public class AdminLoginThrottleService {
     private static final int MAX_FAILURES = 5;
     private static final Duration WINDOW = Duration.ofMinutes(15);
 
-    private final StringRedisTemplate redis;
+    private final ExpiringStateStore stateStore;
 
-    public AdminLoginThrottleService(StringRedisTemplate redis) {
-        this.redis = redis;
+    public AdminLoginThrottleService(ExpiringStateStore stateStore) {
+        this.stateStore = stateStore;
     }
 
     public void check(String username) {
-        String value = redis.opsForValue().get(key(username));
+        String value = stateStore.get(key(username));
         if (value != null && Integer.parseInt(value) >= MAX_FAILURES) {
             throw new BusinessException(42901, "登录失败次数过多，请 15 分钟后再试");
         }
@@ -29,14 +29,11 @@ public class AdminLoginThrottleService {
 
     public void recordFailure(String username) {
         String key = key(username);
-        Long count = redis.opsForValue().increment(key);
-        if (count != null && count == 1L) {
-            redis.expire(key, WINDOW);
-        }
+        stateStore.increment(key, 1, WINDOW);
     }
 
     public void clear(String username) {
-        redis.delete(key(username));
+        stateStore.delete(key(username));
     }
 
     private String key(String username) {

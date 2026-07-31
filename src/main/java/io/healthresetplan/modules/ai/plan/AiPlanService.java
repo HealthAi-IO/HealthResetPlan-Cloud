@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import io.healthresetplan.common.exception.BusinessException;
-import io.healthresetplan.common.util.HashUtils;
 import io.healthresetplan.modules.ai.AiUsageLimiter;
 import io.healthresetplan.modules.ai.MedicalRiskGuard;
 import io.healthresetplan.modules.ai.oneapi.OneApiProperties;
@@ -12,11 +11,8 @@ import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import io.healthresetplan.modules.membership.MembershipService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -25,8 +21,6 @@ public class AiPlanService {
 
     private static final Logger log = LoggerFactory.getLogger(AiPlanService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final String CACHE_PREFIX = "hrp:ai:plan:";
-    private static final String PLAN_PROMPT_VERSION = "v3-json";
 
     private static final String SYSTEM_PROMPT = """
             你是健康管理顾问。根据用户档案生成 7 天健康方案，只输出可 JSON.parse 的纯 JSON，不要 Markdown。
@@ -66,18 +60,15 @@ public class AiPlanService {
     private final OneApiService oneApiService;
     private final MembershipService membershipService;
     private final OneApiProperties oneApiProperties;
-    private final StringRedisTemplate redisTemplate;
     private final AiUsageLimiter usageLimiter;
 
     public AiPlanService(OneApiService oneApiService,
                          MembershipService membershipService,
                          OneApiProperties oneApiProperties,
-                         StringRedisTemplate redisTemplate,
                          AiUsageLimiter usageLimiter) {
         this.oneApiService = oneApiService;
         this.membershipService = membershipService;
         this.oneApiProperties = oneApiProperties;
-        this.redisTemplate = redisTemplate;
         this.usageLimiter = usageLimiter;
     }
 
@@ -98,7 +89,7 @@ public class AiPlanService {
 
         String preferredProvider = req.provider() != null && !req.provider().isBlank()
                 ? req.provider()
-                : null;
+                : "qwen";
         usageLimiter.consume(userId, AiUsageLimiter.Type.PLAN);
         try {
             long maxCompletionTokens = Math.max(1200L, oneApiProperties.getPlanMaxCompletionTokens());
@@ -187,44 +178,6 @@ public class AiPlanService {
             return s.substring(first, last + 1).trim();
         }
         return s;
-    }
-
-    private String cacheKey(String userId, AiPlanRequest req, String preferredProvider) {
-        try {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("version", PLAN_PROMPT_VERSION);
-            payload.put("userId", userId);
-            payload.put("provider", preferredProvider != null ? preferredProvider : "auto");
-            payload.put("request", req);
-            return CACHE_PREFIX + HashUtils.sha256Hex(MAPPER.writeValueAsString(payload));
-        } catch (Exception e) {
-            return CACHE_PREFIX + HashUtils.sha256Hex(PLAN_PROMPT_VERSION + ":" + userId + ":" + req);
-        }
-    }
-
-    private String readCachedPlan(String key) {
-        if (oneApiProperties.getPlanCacheMinutes() <= 0) {
-            return null;
-        }
-        try {
-            String cached = redisTemplate.opsForValue().get(key);
-            return cached != null && isUsablePlan(cached) ? cached : null;
-        } catch (Exception e) {
-            log.debug("读取 AI 计划缓存失败，继续实时生成: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    private void cachePlan(String key, String json) {
-        int cacheMinutes = oneApiProperties.getPlanCacheMinutes();
-        if (cacheMinutes <= 0) {
-            return;
-        }
-        try {
-            redisTemplate.opsForValue().set(key, json, Duration.ofMinutes(cacheMinutes));
-        } catch (Exception e) {
-            log.debug("写入 AI 计划缓存失败: {}", e.getMessage());
-        }
     }
 
     @SuppressWarnings("unchecked")

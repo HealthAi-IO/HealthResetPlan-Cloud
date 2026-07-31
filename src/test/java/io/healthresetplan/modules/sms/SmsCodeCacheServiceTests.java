@@ -1,13 +1,12 @@
 package io.healthresetplan.modules.sms;
 
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.common.persistence.ExpiringStateStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -18,23 +17,21 @@ import static org.mockito.Mockito.when;
 class SmsCodeCacheServiceTests {
 
     @Mock
-    private StringRedisTemplate redisTemplate;
-
-    @Mock
-    private ValueOperations<String, String> valueOperations;
+    private ExpiringStateStore stateStore;
 
     private SmsCodeCacheService service;
 
     @BeforeEach
     void setUp() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        service = new SmsCodeCacheService(redisTemplate);
+        service = new SmsCodeCacheService(stateStore);
     }
 
     @Test
     void fifthIncorrectAttemptInvalidatesCode() {
-        when(valueOperations.get("hrp:sms:code:login:user-hash")).thenReturn("123456");
-        when(valueOperations.increment("hrp:sms:failure:login:user-hash")).thenReturn(5L);
+        when(stateStore.get("hrp:sms:code:login:user-hash")).thenReturn("123456");
+        when(stateStore.increment(
+                "hrp:sms:failure:login:user-hash", 1, java.time.Duration.ofMinutes(10)))
+                .thenReturn(5L);
 
         BusinessException error = assertThrows(
                 BusinessException.class,
@@ -42,6 +39,6 @@ class SmsCodeCacheServiceTests {
         );
 
         assertEquals(42901, error.getCode());
-        verify(redisTemplate).delete("hrp:sms:code:login:user-hash");
+        verify(stateStore).delete("hrp:sms:code:login:user-hash");
     }
 }

@@ -12,6 +12,7 @@ public class OssProperties {
     private String region = "cn-north-1";
     private String endpoint = "https://s3-internal.cn-north-1.jdcloud-oss.com";
     private String bucket = "health-reset-plan-private";
+    private String localPath = "./.appdata/storage";
 
     public String getAccessKeyId() {
         return accessKeyId;
@@ -51,5 +52,13 @@ public class OssProperties {
 
     public void setBucket(String bucket) {
         this.bucket = bucket;
+    }
+
+    public String getLocalPath() {
+        return localPath;
+    }
+
+    public void setLocalPath(String localPath) {
+        this.localPath = localPath;
     }
 }

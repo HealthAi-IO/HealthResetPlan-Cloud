@@ -2,14 +2,12 @@ package io.healthresetplan.modules.captcha;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.common.persistence.ExpiringStateStore;
 import io.healthresetplan.modules.captcha.dto.CaptchaCreateRequest;
 import io.healthresetplan.modules.captcha.dto.CaptchaTrajectoryPoint;
 import io.healthresetplan.modules.captcha.dto.CaptchaVerifyRequest;
 import io.healthresetplan.modules.captcha.dto.CaptchaVerifyResponse;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
-import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -32,36 +30,28 @@ class CaptchaServiceTests {
 
     @Test
     void challengeAndTicketAreBoundAndConsumedOnce() {
-        StringRedisTemplate redis = mock(StringRedisTemplate.class);
-        @SuppressWarnings("unchecked")
-        ValueOperations<String, String> values = mock(ValueOperations.class);
+        ExpiringStateStore stateStore = mock(ExpiringStateStore.class);
         CaptchaImageGenerator generator = mock(CaptchaImageGenerator.class);
         Map<String, String> cache = new HashMap<>();
 
-        when(redis.opsForValue()).thenReturn(values);
         doAnswer(invocation -> {
             cache.put(invocation.getArgument(0), invocation.getArgument(1));
             return null;
-        }).when(values).set(anyString(), anyString(), any(Duration.class));
-        when(redis.execute(
-                any(RedisScript.class),
-                org.mockito.ArgumentMatchers.<String>anyList()))
-                .thenAnswer(invocation -> {
-                    List<String> keys = invocation.getArgument(1);
-                    return cache.remove(keys.get(0));
-                });
+        }).when(stateStore).put(anyString(), anyString(), any(Duration.class));
+        when(stateStore.take(anyString()))
+                .thenAnswer(invocation -> cache.remove(invocation.getArgument(0)));
         when(generator.generate()).thenReturn(
                 new CaptchaImageGenerator.GeneratedCaptcha(123, "background", "piece"));
 
         CaptchaService service = new CaptchaService(
-                redis,
+                stateStore,
                 new ObjectMapper(),
                 generator,
                 new CaptchaTrajectoryValidator());
 
         String phone = "13800138000";
         String captchaId = service.create(new CaptchaCreateRequest("login", phone)).captchaId();
-        verify(values).set(
+        verify(stateStore).put(
                 startsWith("captcha:challenge:"),
                 anyString(),
                 eq(Duration.ofSeconds(90)));
@@ -73,7 +63,7 @@ class CaptchaServiceTests {
                 124,
                 humanTrajectory()));
         assertFalse(result.ticket().isBlank());
-        verify(values).set(
+        verify(stateStore).put(
                 startsWith("captcha:ticket:"),
                 anyString(),
                 eq(Duration.ofSeconds(120)));

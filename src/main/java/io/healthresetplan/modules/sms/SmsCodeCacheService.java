@@ -1,7 +1,7 @@
 package io.healthresetplan.modules.sms;
 
 import io.healthresetplan.common.exception.BusinessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import io.healthresetplan.common.persistence.ExpiringStateStore;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -14,47 +14,44 @@ public class SmsCodeCacheService {
     private static final String FAILURE_PREFIX = "hrp:sms:failure:";
     private static final int MAX_FAILURES = 5;
 
-    private final StringRedisTemplate redisTemplate;
+    private final ExpiringStateStore stateStore;
 
-    public SmsCodeCacheService(StringRedisTemplate redisTemplate) {
-        this.redisTemplate = redisTemplate;
+    public SmsCodeCacheService(ExpiringStateStore stateStore) {
+        this.stateStore = stateStore;
     }
 
     public void saveCode(String scene, String identifierHash, String code, Duration ttl) {
-        redisTemplate.opsForValue().set(codeKey(scene, identifierHash), code, ttl);
-        redisTemplate.delete(usedKey(scene, identifierHash, code));
-        redisTemplate.delete(failureKey(scene, identifierHash));
+        stateStore.put(codeKey(scene, identifierHash), code, ttl);
+        stateStore.delete(usedKey(scene, identifierHash, code));
+        stateStore.delete(failureKey(scene, identifierHash));
     }
 
     public void verifyAndConsume(String scene, String identifierHash, String code) {
         String key = codeKey(scene, identifierHash);
-        String cachedCode = redisTemplate.opsForValue().get(key);
+        String cachedCode = stateStore.get(key);
         if (cachedCode == null) {
             throw new BusinessException(40001, "验证码已过期，请重新获取");
         }
         if (!cachedCode.equals(code)) {
             String failureKey = failureKey(scene, identifierHash);
-            Long failures = redisTemplate.opsForValue().increment(failureKey);
-            if (failures != null && failures == 1) {
-                redisTemplate.expire(failureKey, Duration.ofMinutes(10));
-            }
-            if (failures != null && failures >= MAX_FAILURES) {
-                redisTemplate.delete(key);
+            long failures = stateStore.increment(failureKey, 1, Duration.ofMinutes(10));
+            if (failures >= MAX_FAILURES) {
+                stateStore.delete(key);
                 throw new BusinessException(42901, "验证码错误次数过多，请重新获取");
             }
             throw new BusinessException(40002, "验证码错误");
         }
 
-        Boolean used = redisTemplate.opsForValue().setIfAbsent(
+        boolean used = stateStore.putIfAbsent(
                 usedKey(scene, identifierHash, code),
                 "1",
                 Duration.ofMinutes(10)
         );
-        if (Boolean.FALSE.equals(used)) {
+        if (!used) {
             throw new BusinessException(40002, "验证码已使用，请重新获取");
         }
-        redisTemplate.delete(key);
-        redisTemplate.delete(failureKey(scene, identifierHash));
+        stateStore.delete(key);
+        stateStore.delete(failureKey(scene, identifierHash));
     }
 
     private String codeKey(String scene, String identifierHash) {

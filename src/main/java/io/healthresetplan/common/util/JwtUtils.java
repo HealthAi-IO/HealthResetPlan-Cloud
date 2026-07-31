@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 
 /**
  * JWT 生成与校验工具。
@@ -114,6 +115,7 @@ public class JwtUtils {
                                  long ttlMillis) {
         long now = System.currentTimeMillis();
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(subject)
                 .claim(CLAIM_TYPE, type)
                 .claim(CLAIM_ACTOR_TYPE, actorType)

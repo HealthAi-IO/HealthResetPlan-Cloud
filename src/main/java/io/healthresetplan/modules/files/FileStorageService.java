@@ -16,20 +16,25 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 @Service
 public class FileStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(FileStorageService.class);
     private static final long MAX_FILE_SIZE = 20 * 1024 * 1024L;
+    private static final long MAX_IMAGE_SIZE = 5 * 1024 * 1024L;
 
     private final OssProperties properties;
     private final DataEncryptionService encryption;
+    private final Path localRoot;
     private volatile S3Client client;
 
     public FileStorageService(OssProperties properties, DataEncryptionService encryption) {
         this.properties = properties;
         this.encryption = encryption;
+        this.localRoot = Path.of(properties.getLocalPath()).toAbsolutePath().normalize();
     }
 
     public String store(MultipartFile file, String userId, String clientId) {
@@ -37,6 +42,16 @@ public class FileStorageService {
         String safeClientId = safe(clientId);
         String objectKey = "files/" + userId + "/" + safeClientId + ".enc";
         putEncrypted(objectKey, bytes(file), userId);
+        return objectKey;
+    }
+
+    public String storeImage(MultipartFile file, String userId, String clientId) {
+        validate(file, MAX_IMAGE_SIZE);
+        byte[] data = bytes(file);
+        validateImage(file.getContentType(), data);
+        String safeClientId = safe(clientId);
+        String objectKey = "files/" + userId + "/" + safeClientId + ".enc";
+        putEncrypted(objectKey, data, userId);
         return objectKey;
     }
 
@@ -49,6 +64,15 @@ public class FileStorageService {
 
     public byte[] read(String objectKey, String userId) {
         requireOwnership(objectKey, userId);
+        if (useLocalStorage()) {
+            Path path = localPath(objectKey);
+            if (!Files.exists(path)) return null;
+            try {
+                return encryption.decryptFile(Files.readAllBytes(path), fileAad(userId, objectKey));
+            } catch (Exception ex) {
+                throw storageFailure("文件读取失败", ex);
+            }
+        }
         try {
             byte[] encrypted = client().getObjectAsBytes(builder -> builder
                     .bucket(properties.getBucket())
@@ -67,6 +91,14 @@ public class FileStorageService {
             return;
         }
         requireOwnership(objectKey, userId);
+        if (useLocalStorage()) {
+            try {
+                Files.deleteIfExists(localPath(objectKey));
+            } catch (Exception ex) {
+                log.warn("本地文件删除失败 objectKey={}", objectKey, ex);
+            }
+            return;
+        }
         try {
             client().deleteObject(builder -> builder.bucket(properties.getBucket()).key(objectKey));
         } catch (S3Exception ex) {
@@ -76,6 +108,16 @@ public class FileStorageService {
 
     private void putEncrypted(String objectKey, byte[] plaintext, String userId) {
         byte[] encrypted = encryption.encryptFile(plaintext, fileAad(userId, objectKey));
+        if (useLocalStorage()) {
+            Path path = localPath(objectKey);
+            try {
+                Files.createDirectories(path.getParent());
+                Files.write(path, encrypted);
+                return;
+            } catch (Exception ex) {
+                throw storageFailure("文件上传失败，请重试", ex);
+            }
+        }
         try {
             client().putObject(
                     builder -> builder
@@ -86,6 +128,18 @@ public class FileStorageService {
         } catch (S3Exception ex) {
             throw storageFailure("文件上传失败，请重试", ex);
         }
+    }
+
+    private boolean useLocalStorage() {
+        return blank(properties.getAccessKeyId()) || blank(properties.getSecretAccessKey());
+    }
+
+    private Path localPath(String objectKey) {
+        Path path = localRoot.resolve(objectKey).normalize();
+        if (!path.startsWith(localRoot)) {
+            throw new BusinessException(40001, "文件路径无效");
+        }
+        return path;
     }
 
     private S3Client client() {
@@ -124,6 +178,38 @@ public class FileStorageService {
             return file.getBytes();
         } catch (Exception ex) {
             throw new BusinessException(50001, "文件读取失败");
+        }
+    }
+
+    private void validateImage(String contentType, byte[] data) {
+        boolean jpeg = data.length >= 3
+                && (data[0] & 0xff) == 0xff
+                && (data[1] & 0xff) == 0xd8
+                && (data[2] & 0xff) == 0xff;
+        boolean png = data.length >= 8
+                && (data[0] & 0xff) == 0x89
+                && data[1] == 0x50
+                && data[2] == 0x4e
+                && data[3] == 0x47
+                && data[4] == 0x0d
+                && data[5] == 0x0a
+                && data[6] == 0x1a
+                && data[7] == 0x0a;
+        boolean webp = data.length >= 12
+                && data[0] == 'R'
+                && data[1] == 'I'
+                && data[2] == 'F'
+                && data[3] == 'F'
+                && data[8] == 'W'
+                && data[9] == 'E'
+                && data[10] == 'B'
+                && data[11] == 'P';
+        boolean valid = ("image/jpeg".equalsIgnoreCase(contentType)
+                || "image/jpg".equalsIgnoreCase(contentType)) && jpeg;
+        valid |= "image/png".equalsIgnoreCase(contentType) && png;
+        valid |= "image/webp".equalsIgnoreCase(contentType) && webp;
+        if (!valid) {
+            throw new BusinessException(40001, "仅支持 JPG、PNG 或 WebP 图片");
         }
     }
 

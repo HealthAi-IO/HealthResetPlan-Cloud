@@ -81,6 +81,15 @@ public class SecurityConfig {
                         .hasAnyAuthority("PERM_plan:read", "PERM_plan:write", "PERM_*")
                         .requestMatchers("/api/v1/admin/content/templates/**")
                         .hasAnyAuthority("PERM_plan:write", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/health-content/**")
+                        .hasAnyAuthority("PERM_content:read", "PERM_content:write", "PERM_content:publish", "PERM_*")
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/v1/admin/health-content/*/publish",
+                                "/api/v1/admin/health-content/*/offline"
+                        ).hasAnyAuthority("PERM_content:publish", "PERM_*")
+                        .requestMatchers("/api/v1/admin/health-content/**")
+                        .hasAnyAuthority("PERM_content:write", "PERM_*")
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/ai/**")
                         .hasAnyAuthority("PERM_ai:read", "PERM_ai:write", "PERM_*")
                         .requestMatchers("/api/v1/admin/ai/**")
@@ -96,6 +105,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers(
                                 "/api/v1/auth/**",
+                                "/api/v1/content/assets",
                                 "/api/v1/releases/check",
                                 "/api/v1/releases/latest",
                                 "/api/v1/health",

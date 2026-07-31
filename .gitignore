@@ -1,6 +1,7 @@
 # Maven / Java
 target/
 *.class
+.appdata/
 
 # 本地密钥配置（绝对不提交到 git）
 src/main/resources/application-local.yml

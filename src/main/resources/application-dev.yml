@@ -4,11 +4,6 @@ spring:
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
   flyway:
     enabled: true
     baseline-on-migrate: true
@@ -49,8 +44,8 @@ app:
       connect-timeout-millis: ${JDCLOUD_SMS_CONNECT_TIMEOUT_MILLIS:3000}
       read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
   ai:
-    # 对话/计划生成厂商优先级：依次尝试，失败自动降级
-    chat-order: [qwen, doubao, glm, deepseek]
+    # 未指定模型时使用列表首项；请求失败不会跨模型自动降级
+    chat-order: [doubao, qwen, glm, deepseek]
     # 体检报告 OCR 使用的视觉模型厂商
     vision-provider: qwen
     # 单用户每日最大 AI 请求次数
@@ -64,16 +59,12 @@ app:
       qwen:
         base-url: ${AI_CHAT_QWEN_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}
         model: ${AI_CHAT_QWEN_MODEL:qwen3.7-plus}
-        api-key: ${AI_CHAT_QWEN_API_KEY:}
       doubao:
         base-url: ${AI_CHAT_DOUBAO_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
-        model: ${AI_CHAT_DOUBAO_MODEL:ep-20260721151735-7px4f}
-        api-key: ${AI_CHAT_VOLCENGINE_API_KEY:}
+        model: ${AI_CHAT_DOUBAO_MODEL:doubao-seed-2-1-pro-260628}
       glm:
         base-url: ${AI_CHAT_GLM_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
-        model: ${AI_CHAT_GLM_MODEL:ep-20260721151959-wgsk4}
-        api-key: ${AI_CHAT_VOLCENGINE_API_KEY:}
+        model: ${AI_CHAT_GLM_MODEL:glm-5-2-260617}
       deepseek:
         base-url: ${AI_CHAT_DEEPSEEK_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
-        model: ${AI_CHAT_DEEPSEEK_MODEL:ep-20260721152104-szzhr}
-        api-key: ${AI_CHAT_VOLCENGINE_API_KEY:}
+        model: ${AI_CHAT_DEEPSEEK_MODEL:deepseek-v4-pro-260425}
