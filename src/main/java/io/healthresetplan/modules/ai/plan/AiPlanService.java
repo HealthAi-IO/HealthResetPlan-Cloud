@@ -57,6 +57,13 @@ public class AiPlanService {
             3. 食材要有份量；不作诊断；指标异常只在 riskAlert 简短提醒就医。
             """;
 
+    private static final String REPAIR_PROMPT = """
+            你是 JSON 格式修复器。把用户提供的健康计划修复为纯 JSON，不要 Markdown，不要解释，不要新增诊疗建议。
+            根对象必须包含 summary、keyFocus、riskAlert、targetCalories、days；days 必须正好 7 条。
+            每条 day 必须包含 dayIndex、weekDay、diet、exercise、reminders；diet 和 exercise 必须是对象，reminders 必须是数组。
+            保留原计划的健康管理内容，只修正字段名、缺失字段、数据类型和天数。
+            """;
+
     private final OneApiService oneApiService;
     private final MembershipService membershipService;
     private final OneApiProperties oneApiProperties;
@@ -99,9 +106,26 @@ public class AiPlanService {
                     preferredProvider,
                     maxCompletionTokens);
             String rawJson = extractJson(completion.content());
-            if (!isUsablePlan(rawJson)) {
-                log.warn("AI plan JSON invalid userId={} provider={}", userId, completion.provider());
-                throw new BusinessException(50301, "AI 方案格式异常，请重试或切换模型");
+            String validationError = planValidationError(rawJson);
+            if (validationError != null) {
+                log.warn("AI plan JSON invalid userId={} provider={} reason={}, retrying repair",
+                        userId, completion.provider(), validationError);
+                OneApiService.AiCompletion repaired = oneApiService.completeJsonWithProvider(
+                        userId,
+                        List.of(
+                                OneApiService.systemMsg(REPAIR_PROMPT),
+                                OneApiService.userMsg(rawJson)
+                        ),
+                        completion.provider(),
+                        maxCompletionTokens);
+                rawJson = extractJson(repaired.content());
+                validationError = planValidationError(rawJson);
+                if (validationError != null) {
+                    log.warn("AI plan JSON repair failed userId={} provider={} reason={}",
+                            userId, repaired.provider(), validationError);
+                    throw new BusinessException(50302, "当前模型返回的计划格式异常，请稍后重试或切换模型");
+                }
+                completion = repaired;
             }
             log.info("AI 计划生成成功 provider={}", completion.provider());
             return new AiPlanResponse(completion.provider(), rawJson, 0, 0);
@@ -180,23 +204,26 @@ public class AiPlanService {
         return s;
     }
 
-    @SuppressWarnings("unchecked")
-    private boolean isUsablePlan(String rawJson) {
+    private String planValidationError(String rawJson) {
         try {
             Map<String, Object> root = MAPPER.readValue(rawJson, new TypeReference<>() {});
             Object daysRaw = root.get("days");
-            if (!(daysRaw instanceof List<?> days) || days.size() != 7) {
-                return false;
+            if (!(daysRaw instanceof List<?> days)) {
+                return "days-not-array";
             }
-            for (Object dayRaw : days) {
-                if (!(dayRaw instanceof Map<?, ?> day)) return false;
-                if (!(day.get("diet") instanceof Map<?, ?>)) return false;
-                if (!(day.get("exercise") instanceof Map<?, ?>)) return false;
-                if (!(day.get("reminders") instanceof List<?>)) return false;
+            if (days.size() != 7) {
+                return "days-size-" + days.size();
             }
-            return true;
+            for (int i = 0; i < days.size(); i++) {
+                Object dayRaw = days.get(i);
+                if (!(dayRaw instanceof Map<?, ?> day)) return "day-" + i + "-not-object";
+                if (!(day.get("diet") instanceof Map<?, ?>)) return "day-" + i + "-diet-invalid";
+                if (!(day.get("exercise") instanceof Map<?, ?>)) return "day-" + i + "-exercise-invalid";
+                if (!(day.get("reminders") instanceof List<?>)) return "day-" + i + "-reminders-invalid";
+            }
+            return null;
         } catch (Exception e) {
-            return false;
+            return "invalid-json";
         }
     }
 }
