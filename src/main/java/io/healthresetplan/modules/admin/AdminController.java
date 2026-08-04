@@ -2,13 +2,13 @@ package io.healthresetplan.modules.admin;
 
 import io.healthresetplan.common.result.R;
 import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.common.crypto.DataEncryptionService;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -28,17 +29,20 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/admin")
-@CrossOrigin(origins = "*")
 public class AdminController {
 
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder();
 
     private final JdbcTemplate jdbc;
     private final OneApiService oneApiService;
+    private final DataEncryptionService encryption;
 
-    public AdminController(JdbcTemplate jdbc, OneApiService oneApiService) {
+    public AdminController(JdbcTemplate jdbc,
+                           OneApiService oneApiService,
+                           DataEncryptionService encryption) {
         this.jdbc = jdbc;
         this.oneApiService = oneApiService;
+        this.encryption = encryption;
     }
 
     @GetMapping("/dashboard")
@@ -293,7 +297,7 @@ public class AdminController {
                       AND a.deleted_at IS NULL
                   ) AS adminCount
                 FROM admin_role r
-                ORDER BY FIELD(r.code, 'super_admin', 'operator', 'auditor'), r.code ASC
+                ORDER BY FIELD(r.code, 'admin', 'super_admin'), r.code ASC
                 """).stream().map(this::adminRoleRow).toList());
     }
 
@@ -407,6 +411,15 @@ public class AdminController {
         }
 
         validateAdminPayload(payload, false);
+        String nextRoleCode = normalizedText(payload.get("roleCode"));
+        if (!currentActorIsSuperAdmin()) {
+            if ("super_admin".equals(stringValue(before.get("role_code")))) {
+                throw new BusinessException(40301, "普通管理员不能修改超级管理员账号");
+            }
+            if (!nextRoleCode.equals(stringValue(before.get("role_code")))) {
+                throw new BusinessException(40301, "普通管理员不能变更管理员角色");
+            }
+        }
 
         String password = normalizedText(payload.get("password"));
         if (password.isBlank()) {
@@ -729,9 +742,8 @@ public class AdminController {
         List<Object> params = new ArrayList<>();
 
         if (keyword != null && !keyword.isBlank()) {
-            where.append(" AND (f.content LIKE ? OR f.user_id LIKE ? OR ua.nickname LIKE ?) ");
+            where.append(" AND (f.user_id LIKE ? OR ua.nickname LIKE ?) ");
             String like = "%" + keyword.trim() + "%";
-            params.add(like);
             params.add(like);
             params.add(like);
         }
@@ -751,12 +763,9 @@ public class AdminController {
         Long total = queryLong("SELECT COUNT(*) FROM feedback f LEFT JOIN user_account ua ON ua.user_id = f.user_id " + where,
                 params.toArray());
         String sql = """
-                SELECT f.id, f.user_id, f.category, f.content,
-                       CASE
-                         WHEN f.contact = '' THEN ''
-                         WHEN CHAR_LENGTH(f.contact) <= 4 THEN '****'
-                         ELSE CONCAT('****', RIGHT(f.contact, 4))
-                       END AS masked_contact,
+                SELECT f.id, f.user_id, f.category,
+                       f.content, f.content_cipher, f.content_nonce, f.content_key_version,
+                       f.contact, f.contact_cipher, f.contact_nonce, f.contact_key_version,
                        f.status, f.priority, f.assignee, f.resolution,
                        f.created_at, f.updated_at, ua.nickname
                 FROM feedback f
@@ -768,8 +777,10 @@ public class AdminController {
         List<Object> listArgs = new ArrayList<>(params);
         listArgs.add(safeSize);
         listArgs.add(offset);
+        List<Map<String, Object>> items = jdbc.queryForList(sql, listArgs.toArray());
+        items.forEach(this::decryptFeedbackRow);
         return R.ok(Map.of(
-                "items", jdbc.queryForList(sql, listArgs.toArray()),
+                "items", items,
                 "total", total == null ? 0 : total,
                 "page", safePage,
                 "pageSize", safeSize
@@ -781,7 +792,8 @@ public class AdminController {
             @PathVariable long feedbackId,
             @RequestBody Map<String, Object> payload,
             HttpServletRequest request) {
-        List<Map<String, Object>> beforeRows = jdbc.queryForList("SELECT * FROM feedback WHERE id = ?", feedbackId);
+        List<Map<String, Object>> beforeRows = jdbc.queryForList(
+                "SELECT status, priority, assignee FROM feedback WHERE id = ?", feedbackId);
         if (beforeRows.isEmpty()) return R.fail(40401, "反馈工单不存在");
 
         int status = intValue(payload.get("status"));
@@ -801,7 +813,9 @@ public class AdminController {
                 normalizedText(payload.get("assignee")),
                 normalizedText(payload.get("resolution")),
                 feedbackId);
-        Map<String, Object> after = jdbc.queryForMap("SELECT * FROM feedback WHERE id = ?", feedbackId);
+        Map<String, Object> after = jdbc.queryForMap(
+                "SELECT id, status, priority, assignee, resolution, updated_at FROM feedback WHERE id = ?",
+                feedbackId);
         writeAuditLog(request, "feedback_ticket_updated", "feedback:" + feedbackId,
                 "before=" + beforeRows.get(0) + ";after=" + after);
         return R.ok(after);
@@ -995,6 +1009,7 @@ public class AdminController {
                   is_force_update,
                   rollout_percent,
                   package_url,
+                  package_sha256,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1046,6 +1061,7 @@ public class AdminController {
                   is_force_update,
                   rollout_percent,
                   package_url,
+                  package_sha256,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1129,7 +1145,7 @@ public class AdminController {
     public R<Map<String, Object>> createRelease(
             @RequestBody Map<String, Object> payload,
             HttpServletRequest request) {
-        validateReleasePayload(payload);
+        validateReleasePayload(payload, true);
 
         jdbc.update("""
                 INSERT INTO app_release (
@@ -1141,12 +1157,13 @@ public class AdminController {
                   is_force_update,
                   rollout_percent,
                   package_url,
+                  package_sha256,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
                   status,
                   released_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 normalizedText(payload.get("platform")),
                 normalizedText(payload.get("channel")),
@@ -1156,6 +1173,7 @@ public class AdminController {
                 booleanValue(payload.get("forceUpdate")) ? 1 : 0,
                 intValue(payload.get("rolloutPercent")),
                 normalizedText(payload.get("packageUrl")),
+                normalizedText(payload.get("packageSha256")).toLowerCase(),
                 decimalValue(payload.get("packageSizeMb")),
                 normalizedText(payload.get("minSupportedVersion")),
                 normalizedText(payload.get("releaseNotes")),
@@ -1184,7 +1202,7 @@ public class AdminController {
         }
 
         Map<String, Object> before = getReleaseById(releaseId);
-        validateReleasePayload(payload);
+        validateReleasePayload(payload, false);
 
         jdbc.update("""
                 UPDATE app_release
@@ -1196,6 +1214,7 @@ public class AdminController {
                     is_force_update = ?,
                     rollout_percent = ?,
                     package_url = ?,
+                    package_sha256 = ?,
                     package_size_mb = ?,
                     min_supported_version = ?,
                     release_notes = ?,
@@ -1211,6 +1230,7 @@ public class AdminController {
                 booleanValue(payload.get("forceUpdate")) ? 1 : 0,
                 intValue(payload.get("rolloutPercent")),
                 normalizedText(payload.get("packageUrl")),
+                normalizedText(payload.get("packageSha256")).toLowerCase(),
                 decimalValue(payload.get("packageSizeMb")),
                 normalizedText(payload.get("minSupportedVersion")),
                 normalizedText(payload.get("releaseNotes")),
@@ -1350,6 +1370,7 @@ public class AdminController {
                   is_force_update,
                   rollout_percent,
                   package_url,
+                  package_sha256,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1518,6 +1539,7 @@ public class AdminController {
                   is_force_update,
                   rollout_percent,
                   package_url,
+                  package_sha256,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1585,6 +1607,7 @@ public class AdminController {
                   is_force_update,
                   rollout_percent,
                   package_url,
+                  package_sha256,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1688,6 +1711,31 @@ public class AdminController {
         return adminAccountRow(rows.get(0));
     }
 
+    private void decryptFeedbackRow(Map<String, Object> row) {
+        long id = number(row.get("id"));
+        String content = decryptFeedbackValue(row, "content", id);
+        String contact = decryptFeedbackValue(row, "contact", id);
+        row.put("content", content);
+        row.put("masked_contact", maskContact(contact));
+        row.keySet().removeIf(key -> key.startsWith("content_") || key.startsWith("contact_"));
+        row.remove("contact");
+    }
+
+    private String decryptFeedbackValue(Map<String, Object> row, String field, long id) {
+        String cipher = stringValue(row.get(field + "_cipher"));
+        if (cipher.isBlank()) return stringValue(row.get(field));
+        return encryption.decryptText(
+                cipher,
+                stringValue(row.get(field + "_nonce")),
+                intValue(row.get(field + "_key_version")),
+                "feedback:" + id + ":" + field);
+    }
+
+    private String maskContact(String contact) {
+        if (contact.isBlank()) return "";
+        return contact.length() <= 4 ? "****" : "****" + contact.substring(contact.length() - 4);
+    }
+
     private void writeAuditLog(HttpServletRequest request, String action, String target, String detail) {
         jdbc.update("""
                 INSERT INTO audit_log (
@@ -1716,6 +1764,12 @@ public class AdminController {
             return "admin";
         }
         return String.valueOf(authentication.getPrincipal());
+    }
+
+    private boolean currentActorIsSuperAdmin() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_SUPER_ADMIN".equals(authority.getAuthority()));
     }
 
     private String requestIp(HttpServletRequest request) {
@@ -1965,12 +2019,13 @@ public class AdminController {
         };
     }
 
-    private void validateReleasePayload(Map<String, Object> payload) {
+    private void validateReleasePayload(Map<String, Object> payload, boolean createMode) {
         String platform = normalizedText(payload.get("platform"));
         String channel = normalizedText(payload.get("channel"));
         String versionName = normalizedText(payload.get("versionName"));
         String releaseStage = normalizedText(payload.get("releaseStage"));
         String packageUrl = normalizedText(payload.get("packageUrl"));
+        String packageSha256 = normalizedText(payload.get("packageSha256"));
         String minSupportedVersion = normalizedText(payload.get("minSupportedVersion"));
         String releaseNotes = normalizedText(payload.get("releaseNotes"));
         int versionCode = intValue(payload.get("versionCode"));
@@ -2000,11 +2055,38 @@ public class AdminController {
         if (packageUrl.isBlank()) {
             throw new IllegalArgumentException("packageUrl 不能为空");
         }
+        if (!isAllowedReleaseUrl(packageUrl)) {
+            throw new IllegalArgumentException("packageUrl 必须使用官方 HTTPS 域名");
+        }
+        if (!packageSha256.isBlank() && !packageSha256.matches("(?i)^[0-9a-f]{64}$")) {
+            throw new IllegalArgumentException("packageSha256 必须是 64 位十六进制字符串");
+        }
+        if (createMode
+                && List.of("android", "windows", "macos").contains(platform)
+                && packageSha256.isBlank()) {
+            throw new IllegalArgumentException("客户端安装包必须提供 packageSha256");
+        }
         if (minSupportedVersion.isBlank()) {
             throw new IllegalArgumentException("minSupportedVersion 不能为空");
         }
         if (releaseNotes.isBlank()) {
             throw new IllegalArgumentException("releaseNotes 不能为空");
+        }
+    }
+
+    static boolean isAllowedReleaseUrl(String value) {
+        try {
+            URI uri = URI.create(value);
+            String host = uri.getHost();
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && uri.getUserInfo() == null
+                    && uri.getPort() == -1
+                    && host != null
+                    && (host.equals("jkcqplan.com")
+                    || host.endsWith(".jkcqplan.com")
+                    || host.equals("apps.apple.com"));
+        } catch (IllegalArgumentException ignored) {
+            return false;
         }
     }
 
@@ -2133,23 +2215,23 @@ public class AdminController {
         return stringValue(value).trim();
     }
 
-    private void validateAdminPayload(Map<String, Object> payload, boolean createMode) {
+    void validateAdminPayload(Map<String, Object> payload, boolean createMode) {
         String username = normalizedText(payload.get("username"));
         String roleCode = normalizedText(payload.get("roleCode"));
         String password = normalizedText(payload.get("password"));
-        List<String> allowedRoles = List.of("super_admin", "operator", "auditor");
+        List<String> allowedRoles = List.of("super_admin", "admin");
 
         if (createMode && username.isBlank()) {
-            throw new IllegalArgumentException("username 不能为空");
+            throw new BusinessException(40001, "管理员账号不能为空");
         }
         if (createMode && password.length() < 6) {
-            throw new IllegalArgumentException("password 不能少于 6 位");
+            throw new BusinessException(40001, "密码不能少于 6 位");
         }
         if (!createMode && !password.isBlank() && password.length() < 6) {
-            throw new IllegalArgumentException("password 不能少于 6 位");
+            throw new BusinessException(40001, "密码不能少于 6 位");
         }
         if (!allowedRoles.contains(roleCode)) {
-            throw new IllegalArgumentException("roleCode 不合法");
+            throw new BusinessException(40001, "管理员角色不合法");
         }
     }
 

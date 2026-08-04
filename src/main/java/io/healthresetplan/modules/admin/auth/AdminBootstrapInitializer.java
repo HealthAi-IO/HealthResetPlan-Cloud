@@ -40,7 +40,9 @@ public class AdminBootstrapInitializer implements CommandLineRunner {
         }
         int updated = jdbc.update("""
                 UPDATE admin_account
-                SET password_hash = ?, status = 1, totp_secret = '', updated_at = NOW(3)
+                SET password_hash = ?, status = 1, totp_secret = '',
+                    totp_secret_cipher = NULL, totp_secret_nonce = NULL,
+                    totp_secret_key_version = NULL, updated_at = NOW(3)
                 WHERE username = 'admin' AND deleted_at IS NULL
                 """, BCRYPT.encode(bootstrapPassword));
         if (updated == 1) {

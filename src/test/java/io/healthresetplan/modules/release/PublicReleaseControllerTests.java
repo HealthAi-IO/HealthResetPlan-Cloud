@@ -23,6 +23,7 @@ class PublicReleaseControllerTests {
                 "version_name", "1.0.2",
                 "package_size_mb", new BigDecimal("14.45"),
                 "package_url", "https://jkcqplan.com/downloads/windows/app.zip",
+                "package_sha256", "a".repeat(64),
                 "updated_at", updatedAt
         )));
 
@@ -35,6 +36,7 @@ class PublicReleaseControllerTests {
         assertThat(data).containsEntry("version", "1.0.2");
         assertThat(data).containsEntry("sizeMb", new BigDecimal("14.45"));
         assertThat(data).containsEntry("downloadUrl", "https://jkcqplan.com/downloads/windows/app.zip");
+        assertThat(data).containsEntry("packageSha256", "a".repeat(64));
         assertThat(data).containsEntry("updatedAt", updatedAt);
     }
 }

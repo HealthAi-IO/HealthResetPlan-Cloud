@@ -30,17 +30,20 @@ public class AdminAuthService {
     private final JwtUtils jwtUtils;
     private final JwtProperties jwtProperties;
     private final TotpVerifier totpVerifier;
+    private final AdminTotpSecretService totpSecrets;
     private final AdminLoginThrottleService loginThrottle;
 
     public AdminAuthService(JdbcTemplate jdbc,
                             JwtUtils jwtUtils,
                             JwtProperties jwtProperties,
                             TotpVerifier totpVerifier,
+                            AdminTotpSecretService totpSecrets,
                             AdminLoginThrottleService loginThrottle) {
         this.jdbc = jdbc;
         this.jwtUtils = jwtUtils;
         this.jwtProperties = jwtProperties;
         this.totpVerifier = totpVerifier;
+        this.totpSecrets = totpSecrets;
         this.loginThrottle = loginThrottle;
     }
 
@@ -55,13 +58,13 @@ public class AdminAuthService {
         if (number(admin.get("status")) != 1) {
             throw new BusinessException(40301, "管理员账号已被禁用");
         }
-        if (!totpVerifier.verify(text(admin.get("totp_secret")), request.getTotpCode())) {
+        long adminId = number(admin.get("id"));
+        if (!totpVerifier.verify(totpSecrets.decrypt(adminId, admin), request.getTotpCode())) {
             loginThrottle.recordFailure(request.getUsername());
             throw new BusinessException(40103, "动态验证码错误");
         }
         loginThrottle.clear(request.getUsername());
 
-        long adminId = number(admin.get("id"));
         jdbc.update("""
                 UPDATE admin_account
                 SET last_login_at = NOW(3), last_login_ip = ?
@@ -125,7 +128,7 @@ public class AdminAuthService {
         profile.put("nickname", text(admin.get("nickname")));
         profile.put("roleCode", text(admin.get("role_code")));
         profile.put("permissions", text(admin.get("permissions")));
-        profile.put("totpEnabled", !text(admin.get("totp_secret")).isBlank());
+        profile.put("totpEnabled", totpSecrets.isEnabled(admin));
         profile.put("lastLoginAt", admin.get("last_login_at"));
         profile.put("lastLoginIp", text(admin.get("last_login_ip")));
         return profile;
@@ -134,7 +137,7 @@ public class AdminAuthService {
     public Map<String, Object> createTotpSetup(long adminId) {
         Map<String, Object> admin = findById(adminId);
         if (admin.isEmpty()) throw new BusinessException(40401, "管理员不存在");
-        if (!text(admin.get("totp_secret")).isBlank()) {
+        if (totpSecrets.isEnabled(admin)) {
             throw new BusinessException(40901, "双因素认证已经启用");
         }
         String secret = totpVerifier.generateSecret();
@@ -150,10 +153,7 @@ public class AdminAuthService {
         if (!totpVerifier.verify(secret, code)) {
             throw new BusinessException(40103, "动态验证码错误");
         }
-        int updated = jdbc.update("""
-                UPDATE admin_account SET totp_secret = ?
-                WHERE id = ? AND status = 1 AND deleted_at IS NULL AND totp_secret = ''
-                """, secret.trim().toUpperCase(), adminId);
+        int updated = totpSecrets.enable(adminId, secret);
         if (updated == 0) throw new BusinessException(40901, "双因素认证状态已变化，请刷新后重试");
         writeAudit(adminId, "admin_totp_enabled", "admin_account:" + adminId, request);
     }
@@ -161,12 +161,12 @@ public class AdminAuthService {
     @Transactional
     public void disableTotp(long adminId, String code, HttpServletRequest request) {
         Map<String, Object> admin = findById(adminId);
-        String secret = text(admin.get("totp_secret"));
+        String secret = totpSecrets.decrypt(adminId, admin);
         if (secret.isBlank()) return;
         if (!totpVerifier.verify(secret, code)) {
             throw new BusinessException(40103, "动态验证码错误");
         }
-        jdbc.update("UPDATE admin_account SET totp_secret = '' WHERE id = ?", adminId);
+        totpSecrets.disable(adminId);
         writeAudit(adminId, "admin_totp_disabled", "admin_account:" + adminId, request);
     }
 
@@ -217,7 +217,7 @@ public class AdminAuthService {
                 text(admin.get("nickname")),
                 roleCode,
                 text(admin.get("permissions")),
-                !text(admin.get("totp_secret")).isBlank()
+                totpSecrets.isEnabled(admin)
         );
     }
 

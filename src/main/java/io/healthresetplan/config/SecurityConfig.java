@@ -59,10 +59,12 @@ public class SecurityConfig {
                                 "/api/v1/admin/auth/totp/setup",
                                 "/api/v1/admin/auth/totp/enable"
                         ).authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/admin/system/admins")
+                        .hasRole("SUPER_ADMIN")
                         .requestMatchers(
                                 "/api/v1/admin/system/admins/**",
                                 "/api/v1/admin/system/roles"
-                        ).hasRole("SUPER_ADMIN")
+                        ).hasRole("ADMIN")
                         .requestMatchers("/api/v1/admin/vip/**", "/api/v1/admin/orders/**").denyAll()
                         .requestMatchers("/api/v1/admin/feedback/**").denyAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/users/**")

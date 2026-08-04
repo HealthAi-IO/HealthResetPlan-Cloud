@@ -312,6 +312,7 @@ public class AuthService {
 
         sessionMapper.delete(new LambdaQueryWrapper<UserSession>()
                 .eq(UserSession::getUserId, userId));
+        jdbc.update("DELETE FROM web_push_subscription WHERE user_id = ?", userId);
     }
 
     public PasswordResetCodeResponse sendAccountRecoveryCode(String phone) {

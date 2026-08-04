@@ -37,7 +37,7 @@ public class PublicReleaseController {
         }
 
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT version_name, package_size_mb, package_url,
+                SELECT version_name, package_size_mb, package_url, package_sha256,
                        COALESCE(released_at, updated_at) AS updated_at
                 FROM app_release
                 WHERE deleted_at IS NULL
@@ -63,6 +63,7 @@ public class PublicReleaseController {
         response.put("version", release.get("version_name"));
         response.put("sizeMb", release.get("package_size_mb"));
         response.put("downloadUrl", release.get("package_url"));
+        response.put("packageSha256", release.get("package_sha256"));
         response.put("updatedAt", release.get("updated_at"));
         return R.ok(response);
     }
@@ -95,7 +96,7 @@ public class PublicReleaseController {
 
         List<Map<String, Object>> rows = jdbc.queryForList("""
                 SELECT id, platform, channel, version_name, version_code, release_stage,
-                       is_force_update, rollout_percent, package_url, package_size_mb,
+                       is_force_update, rollout_percent, package_url, package_sha256, package_size_mb,
                        min_supported_version, release_notes, released_at
                 FROM app_release
                 """ + where + """
@@ -134,6 +135,7 @@ public class PublicReleaseController {
         response.put("minimumSupportedVersion", minimumVersion);
         response.put("channel", release.get("channel"));
         response.put("packageUrl", release.get("package_url"));
+        response.put("packageSha256", release.get("package_sha256"));
         response.put("packageSizeMb", release.get("package_size_mb"));
         response.put("releaseNotes", release.get("release_notes"));
         response.put("releasedAt", release.get("released_at"));
