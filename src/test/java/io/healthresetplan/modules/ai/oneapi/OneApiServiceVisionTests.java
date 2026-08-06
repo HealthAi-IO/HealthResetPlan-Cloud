@@ -25,12 +25,24 @@ class OneApiServiceVisionTests {
     }
 
     @Test
-    void providerSelectionDoesNotFallBackToAnotherModel() {
+    void providerSelectionKeepsPreferredModelFirstAndFallsBack() {
         OneApiProperties properties = new OneApiProperties();
         properties.setChatOrder(List.of("doubao", "qwen", "glm", "deepseek"));
         OneApiService service = new OneApiService(properties, null);
 
-        assertEquals(List.of("glm"), service.providerSelection("glm"));
-        assertEquals(List.of("doubao"), service.providerSelection(null));
+        assertEquals(
+                List.of("glm", "doubao", "qwen", "deepseek"),
+                service.providerSelection("glm"));
+        assertEquals(
+                List.of("doubao", "qwen", "glm", "deepseek"),
+                service.providerSelection(null));
+    }
+
+    @Test
+    void structuredOutputDisablesThinkingForVolcengineProviders() {
+        assertTrue(OneApiService.isVolcengineProvider("doubao"));
+        assertTrue(OneApiService.isVolcengineProvider("glm"));
+        assertTrue(OneApiService.isVolcengineProvider("deepseek"));
+        assertFalse(OneApiService.isVolcengineProvider("qwen"));
     }
 }

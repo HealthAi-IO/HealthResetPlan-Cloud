@@ -35,4 +35,30 @@ class CaptchaTrajectoryValidatorTests {
 
         assertFalse(validator.isValid(points, 120, 120, 272));
     }
+
+    @Test
+    void acceptsAQuickNaturalSwipe() {
+        long[] times = {0, 35, 72, 110, 150, 194, 240};
+        double[] xs = {0, 5, 18, 40, 70, 94, 110};
+        double[] ys = {100, 100.2, 100.5, 100.7, 100.4, 100.1, 100.3};
+        List<CaptchaTrajectoryPoint> points = new ArrayList<>();
+        for (int i = 0; i < times.length; i++) {
+            points.add(new CaptchaTrajectoryPoint(xs[i], ys[i], times[i]));
+        }
+
+        assertTrue(validator.isValid(points, 110, 108, 272));
+    }
+
+    @Test
+    void rejectsAWellFormedSwipeOutsideTheTarget() {
+        List<CaptchaTrajectoryPoint> points = new ArrayList<>();
+        long[] times = {0, 35, 72, 110, 150, 194, 240};
+        double[] xs = {0, 5, 18, 40, 70, 94, 110};
+        double[] ys = {100, 100.2, 100.5, 100.7, 100.4, 100.1, 100.3};
+        for (int i = 0; i < times.length; i++) {
+            points.add(new CaptchaTrajectoryPoint(xs[i], ys[i], times[i]));
+        }
+
+        assertFalse(validator.isValid(points, 110, 95, 272));
+    }
 }

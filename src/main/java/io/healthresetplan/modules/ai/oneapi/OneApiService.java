@@ -25,10 +25,12 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -167,6 +169,9 @@ public class OneApiService {
                     request.responseFormat(ResponseFormatJsonObject.builder().build());
                     if ("qwen".equalsIgnoreCase(providerName)) {
                         request.putAdditionalBodyProperty("enable_thinking", JsonValue.from(false));
+                    } else if (isVolcengineProvider(providerName)) {
+                        request.putAdditionalBodyProperty(
+                                "thinking", JsonValue.from(Map.of("type", "disabled")));
                     }
                 }
                 var response = client.chat().completions().create(request.build());
@@ -213,6 +218,7 @@ public class OneApiService {
             if (client == null) continue;
 
             String model = providerConfigs.get(providerName).getModel();
+            AtomicBoolean emitted = new AtomicBoolean(false);
             try {
                 try (var streamResponse = client.chat().completions().createStreaming(
                         ChatCompletionCreateParams.builder()
@@ -220,20 +226,26 @@ public class OneApiService {
                                 .messages(messages)
                                 .maxCompletionTokens(2048L)
                                 .build())) {
-                    streamResponse.stream().forEach(chunk -> extractToken(chunk).forEach(tokenConsumer));
+                    streamResponse.stream().forEach(chunk -> extractToken(chunk).forEach(token -> {
+                        emitted.set(true);
+                        tokenConsumer.accept(token);
+                    }));
                 }
 
                 log.info("AI stream done provider={}", providerName);
                 onDone.run();
                 return;
             } catch (RateLimitException e) {
+                failIfStreamStarted(providerName, emitted);
                 log.warn("AI stream provider rate limited provider={}", providerName);
                 rateLimited = true;
             } catch (UnauthorizedException e) {
+                failIfStreamStarted(providerName, emitted);
                 log.error("AI stream key unauthorized provider={}", providerName);
             } catch (BusinessException e) {
                 throw e;
             } catch (Exception e) {
+                failIfStreamStarted(providerName, emitted);
                 log.warn("AI stream provider={} unavailable", providerName);
             }
         }
@@ -242,6 +254,13 @@ public class OneApiService {
             throw new BusinessException(42902, "AI 服务暂时繁忙，请稍后再试");
         }
         throw new BusinessException(50301, "所有 AI 厂商暂时不可用，请稍后重试");
+    }
+
+    private void failIfStreamStarted(String providerName, AtomicBoolean emitted) {
+        if (emitted.get()) {
+            log.warn("AI stream interrupted after output provider={}", providerName);
+            throw new BusinessException(50303, "AI 回答中断，请重新提问");
+        }
     }
 
     public VisionCompletion analyzeImage(String userId, String imageBase64, String mimeType, String prompt) {
@@ -381,12 +400,17 @@ public class OneApiService {
     }
 
     List<String> providerSelection(String preferredProvider) {
+        LinkedHashSet<String> providers = new LinkedHashSet<>();
         if (preferredProvider != null && !preferredProvider.isBlank()) {
-            return List.of(preferredProvider.trim());
+            providers.add(preferredProvider.trim());
         }
-        return props.getChatOrder().isEmpty()
-                ? List.of()
-                : List.of(props.getChatOrder().get(0));
+        providers.addAll(props.getChatOrder());
+        providers.removeIf(provider -> provider == null || provider.isBlank());
+        return List.copyOf(providers);
+    }
+
+    static boolean isVolcengineProvider(String providerName) {
+        return List.of("doubao", "glm", "deepseek").contains(providerName);
     }
 
     private String text(Object value) {

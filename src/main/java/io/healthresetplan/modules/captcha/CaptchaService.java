@@ -73,7 +73,7 @@ public class CaptchaService {
         int maxX = CaptchaImageGenerator.WIDTH - CaptchaImageGenerator.PIECE_SIZE;
         if (!trajectoryValidator.isValid(
                 request.trajectory(), request.finalX(), state.targetX(), maxX)) {
-            throw new BusinessException(40023, "滑动验证失败，请重试");
+            throw new BusinessException(40023, "请对准缺口并平稳滑动后再试");
         }
 
         String ticket = randomToken();

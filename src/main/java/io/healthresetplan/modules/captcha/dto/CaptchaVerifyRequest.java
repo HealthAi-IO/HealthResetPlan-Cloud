@@ -12,6 +12,6 @@ public record CaptchaVerifyRequest(
         @NotBlank(message = "scene is required") String scene,
         @NotBlank(message = "principal is required") String principal,
         double finalX,
-        @NotNull @Size(min = 12, max = 300, message = "滑动过快，请慢一点再试")
+        @NotNull @Size(min = 6, max = 300, message = "请对准缺口并平稳滑动后再试")
         List<@Valid CaptchaTrajectoryPoint> trajectory) {
 }

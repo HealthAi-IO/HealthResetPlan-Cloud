@@ -413,6 +413,9 @@ public class AdminController {
         validateAdminPayload(payload, false);
         String nextRoleCode = normalizedText(payload.get("roleCode"));
         if (!currentActorIsSuperAdmin()) {
+            if (currentActorAdminId() != adminId) {
+                throw new BusinessException(40301, "普通管理员只能修改自己的账号");
+            }
             if ("super_admin".equals(stringValue(before.get("role_code")))) {
                 throw new BusinessException(40301, "普通管理员不能修改超级管理员账号");
             }
@@ -1770,6 +1773,18 @@ public class AdminController {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         return authentication != null && authentication.getAuthorities().stream()
                 .anyMatch(authority -> "ROLE_SUPER_ADMIN".equals(authority.getAuthority()));
+    }
+
+    private long currentActorAdminId() {
+        String actor = currentActorId();
+        if (!actor.startsWith("admin:")) {
+            throw new BusinessException(40301, "管理员身份无效");
+        }
+        try {
+            return Long.parseLong(actor.substring("admin:".length()));
+        } catch (NumberFormatException e) {
+            throw new BusinessException(40301, "管理员身份无效");
+        }
     }
 
     private String requestIp(HttpServletRequest request) {

@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -100,35 +101,17 @@ public class AiPlanService {
         usageLimiter.consume(userId, AiUsageLimiter.Type.PLAN);
         try {
             long maxCompletionTokens = Math.max(1200L, oneApiProperties.getPlanMaxCompletionTokens());
-            OneApiService.AiCompletion completion = oneApiService.completeJsonWithProvider(
-                    userId,
-                    messages,
-                    preferredProvider,
-                    maxCompletionTokens);
-            String rawJson = extractJson(completion.content());
-            String validationError = planValidationError(rawJson);
-            if (validationError != null) {
-                log.warn("AI plan JSON invalid userId={} provider={} reason={}, retrying repair",
-                        userId, completion.provider(), validationError);
-                OneApiService.AiCompletion repaired = oneApiService.completeJsonWithProvider(
-                        userId,
-                        List.of(
-                                OneApiService.systemMsg(REPAIR_PROMPT),
-                                OneApiService.userMsg(rawJson)
-                        ),
-                        completion.provider(),
-                        maxCompletionTokens);
-                rawJson = extractJson(repaired.content());
-                validationError = planValidationError(rawJson);
-                if (validationError != null) {
-                    log.warn("AI plan JSON repair failed userId={} provider={} reason={}",
-                            userId, repaired.provider(), validationError);
-                    throw new BusinessException(50302, "当前模型返回的计划格式异常，请稍后重试或切换模型");
+            for (String provider : planProviders(preferredProvider)) {
+                try {
+                    AiPlanResponse response = generateWithProvider(
+                            userId, messages, provider, maxCompletionTokens);
+                    if (response != null) return response;
+                } catch (BusinessException e) {
+                    log.warn("AI plan provider failed userId={} provider={} code={}",
+                            userId, provider, e.getCode());
                 }
-                completion = repaired;
             }
-            log.info("AI 计划生成成功 provider={}", completion.provider());
-            return new AiPlanResponse(completion.provider(), rawJson, 0, 0);
+            throw new BusinessException(50302, "所有模型均未返回有效计划，已切换为本地规则计划");
         } catch (RuntimeException e) {
             usageLimiter.release(userId, AiUsageLimiter.Type.PLAN);
             throw e;
@@ -136,6 +119,49 @@ public class AiPlanService {
     }
 
     // ── 内部 ─────────────────────────────────────────────────────
+
+    private AiPlanResponse generateWithProvider(
+            String userId,
+            List<ChatCompletionMessageParam> messages,
+            String provider,
+            long maxCompletionTokens) {
+        OneApiService.AiCompletion completion = oneApiService.completeJsonWithProvider(
+                userId, messages, provider, maxCompletionTokens);
+        String rawJson = extractJson(completion.content());
+        String validationError = planValidationError(rawJson);
+        if (validationError == null) {
+            log.info("AI 计划生成成功 provider={}", completion.provider());
+            return new AiPlanResponse(completion.provider(), rawJson, 0, 0);
+        }
+
+        log.warn("AI plan JSON invalid userId={} provider={} reason={}, retrying repair",
+                userId, completion.provider(), validationError);
+        OneApiService.AiCompletion repaired = oneApiService.completeJsonWithProvider(
+                userId,
+                List.of(
+                        OneApiService.systemMsg(REPAIR_PROMPT),
+                        OneApiService.userMsg(rawJson)
+                ),
+                completion.provider(),
+                maxCompletionTokens);
+        rawJson = extractJson(repaired.content());
+        validationError = planValidationError(rawJson);
+        if (validationError != null) {
+            log.warn("AI plan JSON repair failed userId={} provider={} reason={}",
+                    userId, repaired.provider(), validationError);
+            return null;
+        }
+        log.info("AI 计划修复成功 provider={}", repaired.provider());
+        return new AiPlanResponse(repaired.provider(), rawJson, 0, 0);
+    }
+
+    private List<String> planProviders(String preferredProvider) {
+        LinkedHashSet<String> providers = new LinkedHashSet<>();
+        providers.add(preferredProvider);
+        providers.addAll(List.of("qwen", "glm", "deepseek", "doubao"));
+        providers.removeIf(provider -> provider == null || provider.isBlank());
+        return List.copyOf(providers);
+    }
 
     private void validateProfile(AiPlanRequest req) {
         if (req.age() < 14 || req.age() > 120
@@ -207,6 +233,11 @@ public class AiPlanService {
     private String planValidationError(String rawJson) {
         try {
             Map<String, Object> root = MAPPER.readValue(rawJson, new TypeReference<>() {});
+            if (!(root.get("summary") instanceof String)) return "summary-invalid";
+            if (!(root.get("keyFocus") instanceof String)) return "key-focus-invalid";
+            Object riskAlert = root.get("riskAlert");
+            if (riskAlert != null && !(riskAlert instanceof String)) return "risk-alert-invalid";
+            if (!(root.get("targetCalories") instanceof Number)) return "target-calories-invalid";
             Object daysRaw = root.get("days");
             if (!(daysRaw instanceof List<?> days)) {
                 return "days-not-array";
@@ -217,9 +248,15 @@ public class AiPlanService {
             for (int i = 0; i < days.size(); i++) {
                 Object dayRaw = days.get(i);
                 if (!(dayRaw instanceof Map<?, ?> day)) return "day-" + i + "-not-object";
+                if (!(day.get("dayIndex") instanceof Number)) return "day-" + i + "-index-invalid";
+                if (!(day.get("weekDay") instanceof String)) return "day-" + i + "-weekday-invalid";
                 if (!(day.get("diet") instanceof Map<?, ?>)) return "day-" + i + "-diet-invalid";
                 if (!(day.get("exercise") instanceof Map<?, ?>)) return "day-" + i + "-exercise-invalid";
-                if (!(day.get("reminders") instanceof List<?>)) return "day-" + i + "-reminders-invalid";
+                if (!(day.get("reminders") instanceof List<?> reminders)
+                        || reminders.size() > 2
+                        || reminders.stream().anyMatch(item -> !(item instanceof String))) {
+                    return "day-" + i + "-reminders-invalid";
+                }
             }
             return null;
         } catch (Exception e) {

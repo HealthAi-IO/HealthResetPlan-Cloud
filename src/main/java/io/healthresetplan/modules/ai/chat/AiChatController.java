@@ -72,7 +72,7 @@ public class AiChatController {
                                 String json = MAPPER.writeValueAsString(Map.of("token", token));
                                 emitter.send(SseEmitter.event().data(json));
                             } catch (Exception e) {
-                                log.warn("SSE send 失败：{}", e.getMessage());
+                                throw new IllegalStateException("SSE client disconnected", e);
                             }
                         },
                         () -> {

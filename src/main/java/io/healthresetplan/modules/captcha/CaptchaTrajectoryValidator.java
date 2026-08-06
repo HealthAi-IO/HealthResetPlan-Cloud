@@ -10,10 +10,10 @@ import java.util.Set;
 @Component
 public class CaptchaTrajectoryValidator {
 
-    private static final double POSITION_TOLERANCE = 5.0;
+    private static final double POSITION_TOLERANCE = 8.0;
 
     public boolean isValid(List<CaptchaTrajectoryPoint> points, double finalX, int targetX, int maxX) {
-        if (points == null || points.size() < 12 || points.size() > 300
+        if (points == null || points.size() < 6 || points.size() > 300
                 || !Double.isFinite(finalX) || Math.abs(finalX - targetX) > POSITION_TOLERANCE) {
             return false;
         }
@@ -21,7 +21,7 @@ public class CaptchaTrajectoryValidator {
         CaptchaTrajectoryPoint first = points.get(0);
         CaptchaTrajectoryPoint last = points.get(points.size() - 1);
         long duration = last.t() - first.t();
-        if (duration < 350 || duration > 8_000 || Math.abs(last.x() - finalX) > 8) {
+        if (duration < 180 || duration > 8_000 || Math.abs(last.x() - finalX) > 8) {
             return false;
         }
 
@@ -73,14 +73,14 @@ public class CaptchaTrajectoryValidator {
         }
 
         if (Math.abs(first.x()) > 4 || maxSeenX - minX < Math.max(30, targetX * 0.75)
-                || maxY - minY < 0.8 || maxY - minY > 40 || intervals.size() < 3
-                || !accelerated || !decelerated) {
+                || maxY - minY < 0.2 || maxY - minY > 40 || intervals.size() < 2
+                || (!accelerated && !decelerated)) {
             return false;
         }
 
         double meanSpeed = speedSum / speedCount;
         double variance = speedSquareSum / speedCount - meanSpeed * meanSpeed;
         double coefficientOfVariation = meanSpeed == 0 ? 0 : Math.sqrt(Math.max(variance, 0)) / meanSpeed;
-        return coefficientOfVariation >= 0.08;
+        return coefficientOfVariation >= 0.04;
     }
 }

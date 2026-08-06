@@ -5,6 +5,9 @@ import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
@@ -69,5 +72,35 @@ class AdminControllerTests {
             assertThat(query).contains(") normalized", "GROUP BY normalized.platform");
             assertThat(query).doesNotContain("GROUP BY platform\n");
         });
+    }
+
+    @Test
+    void ordinaryAdminCannotUpdateAnotherOrdinaryAdmin() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForList(anyString(), any(Object[].class))).thenReturn(List.of(Map.of(
+                "id", 2L,
+                "username", "other-admin",
+                "nickname", "Other",
+                "role_code", "admin",
+                "status", 1,
+                "permissions", "user:read")));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(
+                        "admin:1",
+                        null,
+                        List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+        try {
+            AdminController controller = new AdminController(
+                    jdbc, mock(OneApiService.class), mock(DataEncryptionService.class));
+
+            assertThatThrownBy(() -> controller.updateSystemAdmin(
+                    2L,
+                    Map.of("roleCode", "admin", "nickname", "Other", "enabled", true),
+                    null))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessage("普通管理员只能修改自己的账号");
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 }

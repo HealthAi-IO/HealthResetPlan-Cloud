@@ -33,8 +33,8 @@ app:
     access-ttl-minutes: 60
     refresh-ttl-days: 30
   sms:
-    enabled: false
-    debug-code-enabled: false
+    enabled: ${SMS_ENABLED:false}
+    debug-code-enabled: ${SMS_DEBUG_CODE_ENABLED:false}
   ai:
     chat-order: [doubao, qwen, glm, deepseek]
     vision-provider: ${AI_CHAT_VISION_PROVIDER:qwen}
