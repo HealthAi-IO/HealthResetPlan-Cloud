@@ -15,6 +15,8 @@ package io.healthresetplan.modules.ai.plan;
  * @param recentTc     最近总胆固醇（mmol/L）
  * @param recentLdl    最近 LDL（mmol/L）
  * @param goal         健康目标：lose_weight / lower_bp / lower_glucose / lower_lipid / general
+ * @param goalDetail   用户对目标状态的自由补充
+ * @param targetDate   用户希望达到目标状态的日期，格式 yyyy-MM-dd
  * @param dietPref     饮食偏好：normal / vegetarian / light
  * @param exerciseBase 运动基础：none / light / moderate
  */
@@ -31,6 +33,8 @@ public record AiPlanRequest(
         Double recentTc,
         Double recentLdl,
         String goal,
+        String goalDetail,
+        String targetDate,
         String dietPref,
         String exerciseBase
 ) {

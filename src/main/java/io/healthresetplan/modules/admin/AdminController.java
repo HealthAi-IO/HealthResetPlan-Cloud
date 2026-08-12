@@ -1013,6 +1013,11 @@ public class AdminController {
                   rollout_percent,
                   package_url,
                   package_sha256,
+                  git_commit,
+                  backend_version,
+                  migration_version,
+                  artifact_path,
+                  built_at,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1065,6 +1070,11 @@ public class AdminController {
                   rollout_percent,
                   package_url,
                   package_sha256,
+                  git_commit,
+                  backend_version,
+                  migration_version,
+                  artifact_path,
+                  built_at,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1161,12 +1171,17 @@ public class AdminController {
                   rollout_percent,
                   package_url,
                   package_sha256,
+                  git_commit,
+                  backend_version,
+                  migration_version,
+                  artifact_path,
+                  built_at,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
                   status,
                   released_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 normalizedText(payload.get("platform")),
                 normalizedText(payload.get("channel")),
@@ -1177,6 +1192,11 @@ public class AdminController {
                 intValue(payload.get("rolloutPercent")),
                 normalizedText(payload.get("packageUrl")),
                 normalizedText(payload.get("packageSha256")).toLowerCase(),
+                normalizedText(payload.get("gitCommit")),
+                normalizedText(payload.get("backendVersion")),
+                normalizedText(payload.get("migrationVersion")),
+                normalizedText(payload.get("artifactPath")),
+                releaseTime(payload.get("builtAt")),
                 decimalValue(payload.get("packageSizeMb")),
                 normalizedText(payload.get("minSupportedVersion")),
                 normalizedText(payload.get("releaseNotes")),
@@ -1218,6 +1238,11 @@ public class AdminController {
                     rollout_percent = ?,
                     package_url = ?,
                     package_sha256 = ?,
+                    git_commit = ?,
+                    backend_version = ?,
+                    migration_version = ?,
+                    artifact_path = ?,
+                    built_at = ?,
                     package_size_mb = ?,
                     min_supported_version = ?,
                     release_notes = ?,
@@ -1234,6 +1259,11 @@ public class AdminController {
                 intValue(payload.get("rolloutPercent")),
                 normalizedText(payload.get("packageUrl")),
                 normalizedText(payload.get("packageSha256")).toLowerCase(),
+                normalizedText(payload.get("gitCommit")),
+                normalizedText(payload.get("backendVersion")),
+                normalizedText(payload.get("migrationVersion")),
+                normalizedText(payload.get("artifactPath")),
+                releaseTime(payload.get("builtAt")),
                 decimalValue(payload.get("packageSizeMb")),
                 normalizedText(payload.get("minSupportedVersion")),
                 normalizedText(payload.get("releaseNotes")),
@@ -1374,6 +1404,11 @@ public class AdminController {
                   rollout_percent,
                   package_url,
                   package_sha256,
+                  git_commit,
+                  backend_version,
+                  migration_version,
+                  artifact_path,
+                  built_at,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1543,6 +1578,11 @@ public class AdminController {
                   rollout_percent,
                   package_url,
                   package_sha256,
+                  git_commit,
+                  backend_version,
+                  migration_version,
+                  artifact_path,
+                  built_at,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1611,6 +1651,11 @@ public class AdminController {
                   rollout_percent,
                   package_url,
                   package_sha256,
+                  git_commit,
+                  backend_version,
+                  migration_version,
+                  artifact_path,
+                  built_at,
                   package_size_mb,
                   min_supported_version,
                   release_notes,
@@ -1818,6 +1863,9 @@ public class AdminController {
         parts.add("channel=" + stringValue(subject.get("channel")));
         parts.add("version=" + stringValue(subject.get("version_name")));
         parts.add("versionCode=" + number(subject.get("version_code")));
+        parts.add("gitCommit=" + stringValue(subject.get("git_commit")));
+        parts.add("backendVersion=" + stringValue(subject.get("backend_version")));
+        parts.add("migrationVersion=" + stringValue(subject.get("migration_version")));
         parts.add("releaseStage=" + stringValue(subject.get("release_stage")));
         parts.add("enabled=" + booleanValue(subject.get("enabled")));
         parts.add("forceUpdate=" + booleanValue(subject.get("forceUpdate")));
@@ -2041,6 +2089,10 @@ public class AdminController {
         String releaseStage = normalizedText(payload.get("releaseStage"));
         String packageUrl = normalizedText(payload.get("packageUrl"));
         String packageSha256 = normalizedText(payload.get("packageSha256"));
+        String gitCommit = normalizedText(payload.get("gitCommit"));
+        String backendVersion = normalizedText(payload.get("backendVersion"));
+        String migrationVersion = normalizedText(payload.get("migrationVersion"));
+        String artifactPath = normalizedText(payload.get("artifactPath"));
         String minSupportedVersion = normalizedText(payload.get("minSupportedVersion"));
         String releaseNotes = normalizedText(payload.get("releaseNotes"));
         int versionCode = intValue(payload.get("versionCode"));
@@ -2080,6 +2132,18 @@ public class AdminController {
                 && List.of("android", "windows", "macos").contains(platform)
                 && packageSha256.isBlank()) {
             throw new IllegalArgumentException("客户端安装包必须提供 packageSha256");
+        }
+        if (createMode && !gitCommit.matches("(?i)^[0-9a-f]{7,64}$")) {
+            throw new IllegalArgumentException("发布记录必须提供有效的 gitCommit");
+        }
+        if (createMode && backendVersion.isBlank()) {
+            throw new IllegalArgumentException("发布记录必须提供 backendVersion");
+        }
+        if (createMode && migrationVersion.isBlank()) {
+            throw new IllegalArgumentException("发布记录必须提供 migrationVersion");
+        }
+        if (createMode && artifactPath.isBlank()) {
+            throw new IllegalArgumentException("发布记录必须提供 artifactPath");
         }
         if (minSupportedVersion.isBlank()) {
             throw new IllegalArgumentException("minSupportedVersion 不能为空");

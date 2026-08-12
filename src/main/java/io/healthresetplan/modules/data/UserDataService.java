@@ -25,7 +25,7 @@ public class UserDataService {
     private static final int MAX_JSON_LENGTH = 10 * 1024 * 1024;
     private static final Set<String> ALLOWED_TABLES = Set.of(
             "user_profile", "health_indicator", "plan", "clock_record", "reminder",
-            "health_report", "meal_record", "meal_recipe", "meal_settings", "ai_session", "ai_message",
+            "health_report", "ai_weekly_report", "meal_record", "meal_recipe", "meal_settings", "ai_session", "ai_message",
             "quit_smoking_profile", "smoking_event");
 
     private final UserDataStateMapper mapper;

@@ -50,6 +50,18 @@ class CaptchaTrajectoryValidatorTests {
     }
 
     @Test
+    void acceptsFlutterHorizontalDragWithStableYAndFrameIntervals() {
+        long[] times = {0, 32, 64, 96, 128, 160, 192, 224};
+        double[] xs = {0, 3, 11, 27, 52, 78, 99, 112};
+        List<CaptchaTrajectoryPoint> points = new ArrayList<>();
+        for (int i = 0; i < times.length; i++) {
+            points.add(new CaptchaTrajectoryPoint(xs[i], 100, times[i]));
+        }
+
+        assertTrue(validator.isValid(points, 112, 110, 272));
+    }
+
+    @Test
     void rejectsAWellFormedSwipeOutsideTheTarget() {
         List<CaptchaTrajectoryPoint> points = new ArrayList<>();
         long[] times = {0, 35, 72, 110, 150, 194, 240};

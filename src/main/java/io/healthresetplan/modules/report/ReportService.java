@@ -134,20 +134,36 @@ public class ReportService {
             log.info("Report OCR finished elapsedMs={} rawLength={}",
                     System.currentTimeMillis() - startedAt,
                     completion.content().length());
-            AnalyzeResponse result = tryParseCompleteResult(completion.content(), completion.label());
-            if (result != null) {
+            AnalyzeResponse result = tryParseResult(completion.content(), completion.label());
+            if (hasAllIndicators(result)) {
                 return result;
             }
 
-            log.warn("Report OCR result incomplete, retrying once");
+            log.warn("Report OCR result incomplete, retrying once sourceRowCount={} indicatorCount={}",
+                    sourceRowCount(result), indicatorCount(result));
             OneApiService.VisionCompletion retry = oneApiService.analyzeImage(
                     userId, base64, mimeType, OCR_FAST_PROMPT + OCR_RETRY_SUFFIX);
-            result = tryParseCompleteResult(retry.content(), retry.label());
-            if (result != null) {
+            AnalyzeResponse retryResult = tryParseResult(retry.content(), retry.label());
+            if (hasAllIndicators(retryResult)) {
+                log.info("Report OCR retry completed elapsedMs={} indicatorCount={}",
+                        System.currentTimeMillis() - startedAt, indicatorCount(retryResult));
+                return retryResult;
+            }
+            result = betterPartialResult(result, retryResult);
+            if (hasUsableContent(result)) {
+                result.setComplete(false);
+                result.setWarning("识别结果可能不完整，请对照原报告人工核对。");
+                log.warn("Report OCR returning partial result elapsedMs={} sourceRowCount={} indicatorCount={}",
+                        System.currentTimeMillis() - startedAt,
+                        sourceRowCount(result), indicatorCount(result));
                 return result;
             }
+            log.warn("Report OCR failed without usable content elapsedMs={}",
+                    System.currentTimeMillis() - startedAt);
             throw new BusinessException(50301, "未能完整识别全部指标，请上传清晰原图或分段拍摄后重试");
         } catch (RuntimeException e) {
+            log.warn("Report OCR failed stage=analyze elapsedMs={} errorType={}",
+                    System.currentTimeMillis() - startedAt, e.getClass().getSimpleName());
             usageLimiter.release(userId, AiUsageLimiter.Type.REPORT);
             throw e;
         }
@@ -196,17 +212,12 @@ public class ReportService {
         reportMapper.deleteById(report.getId());
     }
 
-    private AnalyzeResponse tryParseCompleteResult(String rawJson, String provider) {
+    private AnalyzeResponse tryParseResult(String rawJson, String provider) {
         String json = extractJsonObject(rawJson);
 
         try {
             AnalyzeResponse response = MAPPER.readValue(json, AnalyzeResponse.class);
             response = normalizeAnalyzeResponse(response, provider);
-            if (!hasAllIndicators(response)) {
-                log.warn("LLM OCR result count mismatch sourceRowCount={} indicatorCount={}",
-                        response.getSourceRowCount(), response.getIndicators().size());
-                return null;
-            }
             return response;
         } catch (Exception e) {
             log.warn("LLM OCR JSON parse failed: {}", e.getMessage());
@@ -215,6 +226,7 @@ public class ReportService {
     }
 
     static boolean hasAllIndicators(AnalyzeResponse response) {
+        if (response == null) return false;
         if (response.getIndicators() == null) {
             return false;
         }
@@ -223,6 +235,25 @@ public class ReportService {
         }
         return !response.getIndicators().isEmpty()
                 || (response.getRawText() != null && !response.getRawText().isBlank());
+    }
+
+    static boolean hasUsableContent(AnalyzeResponse response) {
+        return response != null && (indicatorCount(response) > 0
+                || (response.getRawText() != null && !response.getRawText().isBlank()));
+    }
+
+    private AnalyzeResponse betterPartialResult(AnalyzeResponse first, AnalyzeResponse retry) {
+        if (!hasUsableContent(first)) return retry;
+        if (!hasUsableContent(retry)) return first;
+        return indicatorCount(retry) >= indicatorCount(first) ? retry : first;
+    }
+
+    private static int indicatorCount(AnalyzeResponse response) {
+        return response == null || response.getIndicators() == null ? 0 : response.getIndicators().size();
+    }
+
+    private static int sourceRowCount(AnalyzeResponse response) {
+        return response == null ? 0 : response.getSourceRowCount();
     }
 
     private String extractJsonObject(String raw) {

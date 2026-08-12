@@ -59,7 +59,7 @@ app:
     timeout-seconds: 120
     # 7 天健康规划：短期缓存同一档案请求，并限制输出长度来提高速度
     plan-cache-minutes: ${AI_PLAN_CACHE_MINUTES:30}
-    plan-max-completion-tokens: ${AI_PLAN_MAX_COMPLETION_TOKENS:4096}
+    plan-max-completion-tokens: ${AI_PLAN_MAX_COMPLETION_TOKENS:8192}
     providers:
       qwen:
         base-url: ${AI_CHAT_QWEN_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}

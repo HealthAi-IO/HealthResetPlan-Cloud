@@ -14,6 +14,8 @@ public class AnalyzeResponse {
     private String model;
     private boolean highRisk;
     private String riskMessage;
+    private boolean complete = true;
+    private String warning;
 
     public static class Indicator {
         private String category;
@@ -71,4 +73,10 @@ public class AnalyzeResponse {
 
     public String getRiskMessage() { return riskMessage; }
     public void setRiskMessage(String riskMessage) { this.riskMessage = riskMessage; }
+
+    public boolean isComplete() { return complete; }
+    public void setComplete(boolean complete) { this.complete = complete; }
+
+    public String getWarning() { return warning; }
+    public void setWarning(String warning) { this.warning = warning; }
 }

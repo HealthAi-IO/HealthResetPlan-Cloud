@@ -61,7 +61,7 @@ public class OneApiProperties {
     private int planCacheMinutes = 30;
 
     /** 7 天健康规划最大输出 token，控制生成时长和截断风险。 */
-    private long planMaxCompletionTokens = 4096L;
+    private long planMaxCompletionTokens = 8192L;
 
     public Map<String, ProviderConfig> getProviders() { return providers; }
     public void setProviders(Map<String, ProviderConfig> providers) { this.providers = providers; }

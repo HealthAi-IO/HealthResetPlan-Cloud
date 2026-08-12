@@ -135,7 +135,7 @@ public class OneApiService {
             String preferredProvider,
             long maxCompletionTokens) {
 
-        return completeWithProvider(userId, messages, preferredProvider, maxCompletionTokens, false);
+        return completeWithProvider(userId, messages, preferredProvider, maxCompletionTokens, false, true);
     }
 
     public AiCompletion completeJsonWithProvider(
@@ -144,7 +144,16 @@ public class OneApiService {
             String preferredProvider,
             long maxCompletionTokens) {
 
-        return completeWithProvider(userId, messages, preferredProvider, maxCompletionTokens, true);
+        return completeWithProvider(userId, messages, preferredProvider, maxCompletionTokens, true, true);
+    }
+
+    public AiCompletion completeJsonWithExactProvider(
+            String userId,
+            List<ChatCompletionMessageParam> messages,
+            String provider,
+            long maxCompletionTokens) {
+
+        return completeWithProvider(userId, messages, provider, maxCompletionTokens, true, false);
     }
 
     private AiCompletion completeWithProvider(
@@ -152,10 +161,14 @@ public class OneApiService {
             List<ChatCompletionMessageParam> messages,
             String preferredProvider,
             long maxCompletionTokens,
-            boolean jsonOutput) {
+            boolean jsonOutput,
+            boolean allowProviderFallback) {
 
         boolean rateLimited = false;
-        for (String providerName : providerSelection(preferredProvider)) {
+        List<String> providers = allowProviderFallback
+                ? providerSelection(preferredProvider)
+                : List.of(preferredProvider);
+        for (String providerName : providers) {
             OpenAIClient client = clients.get(providerName);
             if (client == null) continue;
 
@@ -185,7 +198,30 @@ public class OneApiService {
             } catch (UnauthorizedException e) {
                 log.error("AI key unauthorized provider={}", providerName);
             } catch (Exception e) {
-                log.warn("AI provider={} unavailable", providerName);
+                if (jsonOutput) {
+                    try {
+                        var response = client.chat().completions().create(
+                                ChatCompletionCreateParams.builder()
+                                        .model(model)
+                                        .messages(messages)
+                                        .maxCompletionTokens(maxCompletionTokens)
+                                        .build());
+                        String content = response.choices().get(0).message().content().orElse("");
+                        if (!content.isBlank()) {
+                            log.info("AI complete ok without response_format provider={} model={}",
+                                    providerName, model);
+                            return new AiCompletion(providerName, content);
+                        }
+                    } catch (Exception fallbackError) {
+                        log.warn("AI provider={} unavailable structuredError={} fallbackError={}",
+                                providerName,
+                                e.getClass().getSimpleName(),
+                                fallbackError.getClass().getSimpleName());
+                        continue;
+                    }
+                }
+                log.warn("AI provider={} unavailable error={}",
+                        providerName, e.getClass().getSimpleName());
             }
         }
 

@@ -31,6 +31,15 @@ class ReportServiceTests {
         assertFalse(ReportService.hasAllIndicators(responseWithCounts(0, 0)));
     }
 
+    @Test
+    void treatsIncompleteIndicatorsAsUsablePartialContent() {
+        AnalyzeResponse incomplete = responseWithCounts(17, 16);
+
+        assertFalse(ReportService.hasAllIndicators(incomplete));
+        assertTrue(ReportService.hasUsableContent(incomplete));
+        assertFalse(ReportService.hasUsableContent(responseWithCounts(0, 0)));
+    }
+
     private AnalyzeResponse responseWithCounts(int sourceRows, int indicators) {
         AnalyzeResponse response = new AnalyzeResponse();
         response.setSourceRowCount(sourceRows);

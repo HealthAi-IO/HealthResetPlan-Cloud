@@ -1,12 +1,18 @@
 package io.healthresetplan.modules.content;
 
 import io.healthresetplan.common.result.R;
+import io.healthresetplan.modules.content.dto.ContentCommentRequest;
+import io.healthresetplan.modules.content.dto.ContentReactionRequest;
 import io.healthresetplan.modules.files.FileStorageService;
+import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,10 +25,14 @@ import java.util.Map;
 public class ContentController {
 
     private final ContentService contentService;
+    private final ContentInteractionService interactionService;
     private final FileStorageService fileStorageService;
 
-    public ContentController(ContentService contentService, FileStorageService fileStorageService) {
+    public ContentController(ContentService contentService,
+                             ContentInteractionService interactionService,
+                             FileStorageService fileStorageService) {
         this.contentService = contentService;
+        this.interactionService = interactionService;
         this.fileStorageService = fileStorageService;
     }
 
@@ -43,6 +53,32 @@ public class ContentController {
     public R<Void> markRead(@PathVariable long id) {
         contentService.markRead(currentUserId(), id);
         return R.ok();
+    }
+
+    @GetMapping("/content/{id}/interactions")
+    public R<Map<String, Object>> interactions(@PathVariable long id) {
+        return R.ok(interactionService.get(currentUserId(), id));
+    }
+
+    @PutMapping("/content/{id}/reaction")
+    public R<Map<String, Object>> react(
+            @PathVariable long id,
+            @Valid @RequestBody ContentReactionRequest request) {
+        return R.ok(interactionService.react(currentUserId(), id, request.reaction()));
+    }
+
+    @PostMapping("/content/{id}/comments")
+    public R<Map<String, Object>> addComment(
+            @PathVariable long id,
+            @Valid @RequestBody ContentCommentRequest request) {
+        return R.ok(interactionService.addComment(currentUserId(), id, request.content()));
+    }
+
+    @DeleteMapping("/content/{id}/comments/{commentId}")
+    public R<Map<String, Object>> deleteComment(
+            @PathVariable long id,
+            @PathVariable long commentId) {
+        return R.ok(interactionService.deleteComment(currentUserId(), id, commentId));
     }
 
     @GetMapping("/messages")

@@ -41,7 +41,7 @@ app:
     daily-limit: ${AI_CHAT_DAILY_LIMIT:30}
     timeout-seconds: ${AI_CHAT_TIMEOUT_SECONDS:120}
     plan-cache-minutes: ${AI_PLAN_CACHE_MINUTES:30}
-    plan-max-completion-tokens: ${AI_PLAN_MAX_COMPLETION_TOKENS:4096}
+    plan-max-completion-tokens: ${AI_PLAN_MAX_COMPLETION_TOKENS:8192}
     providers:
       deepseek:
         base-url: ${AI_CHAT_DEEPSEEK_API_BASE:https://ark.cn-beijing.volces.com/api/v3}

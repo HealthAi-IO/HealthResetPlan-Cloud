@@ -3,9 +3,7 @@ package io.healthresetplan.modules.captcha;
 import io.healthresetplan.modules.captcha.dto.CaptchaTrajectoryPoint;
 import org.springframework.stereotype.Component;
 
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 @Component
 public class CaptchaTrajectoryValidator {
@@ -32,7 +30,6 @@ public class CaptchaTrajectoryValidator {
         double speedSum = 0;
         double speedSquareSum = 0;
         int speedCount = 0;
-        Set<Long> intervals = new HashSet<>();
         double previousSpeed = -1;
         boolean accelerated = false;
         boolean decelerated = false;
@@ -56,7 +53,6 @@ public class CaptchaTrajectoryValidator {
             if (deltaT <= 0 || deltaT > 500) {
                 return false;
             }
-            intervals.add(deltaT);
             double speed = Math.abs(point.x() - previous.x()) / deltaT;
             speedSum += speed;
             speedSquareSum += speed * speed;
@@ -73,7 +69,7 @@ public class CaptchaTrajectoryValidator {
         }
 
         if (Math.abs(first.x()) > 4 || maxSeenX - minX < Math.max(30, targetX * 0.75)
-                || maxY - minY < 0.2 || maxY - minY > 40 || intervals.size() < 2
+                || maxY - minY > 40
                 || (!accelerated && !decelerated)) {
             return false;
         }
