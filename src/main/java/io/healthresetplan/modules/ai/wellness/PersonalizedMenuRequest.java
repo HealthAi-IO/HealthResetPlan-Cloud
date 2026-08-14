@@ -15,6 +15,7 @@ public record PersonalizedMenuRequest(
         String medicalHistory,
         String medications,
         @NotBlank String goal,
+        String goalDetail,
         String dietPreference,
         List<String> allergies,
         List<String> dislikedFoods,

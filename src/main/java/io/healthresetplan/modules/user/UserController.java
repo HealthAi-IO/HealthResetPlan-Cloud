@@ -79,14 +79,17 @@ public class UserController {
         if (StringUtils.hasText(req.getNickname())) {
             wrapper.set(UserAccount::getNickname, req.getNickname().trim());
         }
+        String previousAvatarUrl = account.getAvatarUrl();
+        String nextAvatarUrl = null;
         if (StringUtils.hasText(req.getAvatarUrl())) {
-            deleteReplacedAvatar(account.getAvatarUrl(), req.getAvatarUrl(), userId);
-            wrapper.set(UserAccount::getAvatarUrl, req.getAvatarUrl().trim());
+            nextAvatarUrl = fileStorageService.canonicalAvatarUrl(req.getAvatarUrl(), userId);
+            wrapper.set(UserAccount::getAvatarUrl, nextAvatarUrl);
         }
         if (StringUtils.hasText(req.getCustomId())) {
             wrapper.set(UserAccount::getCustomId, req.getCustomId().trim().toLowerCase(java.util.Locale.ROOT));
         }
         accountMapper.update(null, wrapper);
+        deleteReplacedAvatar(previousAvatarUrl, nextAvatarUrl, userId);
 
         // 重新查询获取最新值
         account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
@@ -115,11 +118,15 @@ public class UserController {
     }
 
     private void deleteReplacedAvatar(String previous, String next, String userId) {
-        if (previous == null || previous.equals(next)) return;
-        int marker = previous.indexOf("objectKey=");
-        if (marker < 0) return;
-        String objectKey = java.net.URLDecoder.decode(
-                previous.substring(marker + "objectKey=".length()), java.nio.charset.StandardCharsets.UTF_8);
-        fileStorageService.delete(objectKey, userId);
+        if (!StringUtils.hasText(previous) || next == null || previous.equals(next)) return;
+        try {
+            String previousKey = fileStorageService.avatarObjectKey(previous);
+            String nextKey = fileStorageService.avatarObjectKey(next);
+            if (previousKey.equals(nextKey)) return;
+            fileStorageService.requireAvatarOwnership(previousKey, userId);
+            fileStorageService.delete(previousKey, userId);
+        } catch (io.healthresetplan.common.exception.BusinessException ignored) {
+            // 兼容历史异常地址，不影响新头像保存。
+        }
     }
 }

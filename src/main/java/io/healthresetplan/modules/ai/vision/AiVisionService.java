@@ -200,6 +200,8 @@ public class AiVisionService {
                     6. 如果图片不清晰，也要基于可见内容给保守估算，并在 advice 说明“估算值，需手动校准”。
                     7. 只有完全没有可见食物时，才允许 foods 为空，并在 advice 说明没有可识别食物。
                     8. 不要诊断疾病，不要推荐药物。
+                    9. healthScore 必须按以下固定 100 分规则评分：营养搭配 30 分、食材质量 25 分、蔬菜与膳食纤维 20 分、烹饪方式 15 分、热量与份量 10 分。天然食物、优质蛋白、蔬菜和粗粮加分；油炸、明显重油、高糖饮料和高度加工食品扣分。
+                    10. 评分只能依据图片中可见并可合理估算的内容；无法判断盐、油或重量时应保守评分，并在 advice 中注明“评分基于图片估算，仅供参考”。
                     """;
         }
 
@@ -363,7 +365,8 @@ public class AiVisionService {
         result.put("proteinG", numberValue(firstPresent(result, "proteinG", "protein", "proteinGram", "蛋白质"), 0));
         result.put("carbsG", numberValue(firstPresent(result, "carbsG", "carbs", "carbohydrate", "carbohydrates", "碳水", "碳水化合物"), 0));
         result.put("fatG", numberValue(firstPresent(result, "fatG", "fat", "脂肪"), 0));
-        result.put("healthScore", numberValue(firstPresent(result, "healthScore", "score", "健康评分"), 0));
+        double healthScore = numberValue(firstPresent(result, "healthScore", "score", "健康评分"), 0);
+        result.put("healthScore", Math.max(0, Math.min(100, healthScore)));
         result.put("glycemicLoad", numberValue(firstPresent(result, "glycemicLoad", "gl", "血糖负荷"), 0));
 
         Object normalizedFoods = result.get("foods");

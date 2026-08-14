@@ -16,6 +16,9 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -55,11 +58,58 @@ public class FileStorageService {
         return objectKey;
     }
 
-    public String storeAvatar(MultipartFile file, String userId, String extension) {
+    public String storeAvatar(MultipartFile file, String userId) {
         validate(file, 2 * 1024 * 1024L);
+        byte[] data = bytes(file);
+        validateImage(file.getContentType(), data);
+        String extension = imageExtension(file.getContentType());
         String objectKey = "avatars/" + userId + "/" + java.util.UUID.randomUUID() + extension + ".enc";
-        putEncrypted(objectKey, bytes(file), userId);
+        putEncrypted(objectKey, data, userId);
         return objectKey;
+    }
+
+    public String canonicalAvatarUrl(String avatarUrl, String userId) {
+        String objectKey = avatarObjectKey(avatarUrl);
+        requireAvatarOwnership(objectKey, userId);
+        return "/api/v1/files/avatar?objectKey="
+                + URLEncoder.encode(objectKey, StandardCharsets.UTF_8);
+    }
+
+    public String avatarObjectKey(String avatarUrl) {
+        try {
+            URI uri = URI.create(avatarUrl == null ? "" : avatarUrl.trim());
+            String path = uri.getPath();
+            if (!("/api/v1/files/avatar".equals(path) || "/api/v1/files/content".equals(path))) {
+                throw new BusinessException(40001, "头像地址无效");
+            }
+            String query = uri.getRawQuery();
+            if (query == null) throw new BusinessException(40001, "头像地址无效");
+            for (String part : query.split("&")) {
+                String[] pair = part.split("=", 2);
+                if (pair.length == 2 && "objectKey".equals(URLDecoder.decode(pair[0], StandardCharsets.UTF_8))) {
+                    return URLDecoder.decode(pair[1], StandardCharsets.UTF_8);
+                }
+            }
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException(40001, "头像地址无效");
+        }
+        throw new BusinessException(40001, "头像地址无效");
+    }
+
+    public void requireAvatarOwnership(String objectKey, String userId) {
+        String prefix = "avatars/" + userId + "/";
+        if (objectKey == null || !objectKey.startsWith(prefix)
+                || objectKey.contains("..")
+                || !objectKey.matches("^avatars/[^/]+/[0-9a-fA-F-]+\\.(jpg|png|webp|gif)\\.enc$")) {
+            throw new BusinessException(40301, "无权使用该头像");
+        }
+    }
+
+    public String avatarContentType(String objectKey) {
+        if (objectKey != null && objectKey.endsWith(".png.enc")) return "image/png";
+        if (objectKey != null && objectKey.endsWith(".webp.enc")) return "image/webp";
+        if (objectKey != null && objectKey.endsWith(".gif.enc")) return "image/gif";
+        return "image/jpeg";
     }
 
     public byte[] read(String objectKey, String userId) {
@@ -222,6 +272,14 @@ public class FileStorageService {
         if (!valid) {
             throw new BusinessException(40001, "仅支持 JPG、PNG 或 WebP 图片");
         }
+    }
+
+    private String imageExtension(String contentType) {
+        if ("image/png".equalsIgnoreCase(contentType)) return ".png";
+        if ("image/webp".equalsIgnoreCase(contentType)) return ".webp";
+        if ("image/jpeg".equalsIgnoreCase(contentType)
+                || "image/jpg".equalsIgnoreCase(contentType)) return ".jpg";
+        throw new BusinessException(40001, "仅支持 JPG、PNG 或 WebP 图片");
     }
 
     private String safe(String value) {

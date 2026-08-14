@@ -7,8 +7,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 @RestController
@@ -34,12 +32,12 @@ public class FileController {
 
     @PostMapping("/avatar")
     public R<Map<String, String>> uploadAvatar(@RequestParam("file") MultipartFile file) {
-        String extension = imageExtension(file);
-        String objectKey = storageService.storeAvatar(file, currentUserId(), extension);
+        String objectKey = storageService.storeAvatar(file, currentUserId());
         return R.ok(Map.of(
                 "objectKey", objectKey,
-                "avatarUrl", "/api/v1/files/content?objectKey="
-                        + URLEncoder.encode(objectKey, StandardCharsets.UTF_8)));
+                "avatarUrl", storageService.canonicalAvatarUrl(
+                        "/api/v1/files/avatar?objectKey=" + objectKey,
+                        currentUserId())));
     }
 
     @GetMapping("/content")
@@ -65,9 +63,10 @@ public class FileController {
             response.sendError(404);
             return;
         }
-        response.setContentType("image/jpeg");
+        response.setContentType(storageService.avatarContentType(objectKey));
         response.setContentLength(data.length);
         response.setHeader("Cache-Control", "private, max-age=300");
+        response.setHeader("X-Content-Type-Options", "nosniff");
         response.getOutputStream().write(data);
     }
 
@@ -75,15 +74,6 @@ public class FileController {
     public R<Void> delete(@RequestParam String objectKey) {
         storageService.delete(objectKey, currentUserId());
         return R.ok();
-    }
-
-    private String imageExtension(MultipartFile file) {
-        String type = file.getContentType();
-        if ("image/png".equalsIgnoreCase(type)) return ".png";
-        if ("image/webp".equalsIgnoreCase(type)) return ".webp";
-        if ("image/gif".equalsIgnoreCase(type)) return ".gif";
-        if ("image/jpeg".equalsIgnoreCase(type) || "image/jpg".equalsIgnoreCase(type)) return ".jpg";
-        throw new io.healthresetplan.common.exception.BusinessException(40001, "仅支持 jpg、png、webp、gif 图片");
     }
 
     private String currentUserId() {

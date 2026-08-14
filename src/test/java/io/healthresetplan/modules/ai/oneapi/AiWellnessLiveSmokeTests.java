@@ -44,7 +44,7 @@ class AiWellnessLiveSmokeTests {
         );
 
         AiWellnessResponse menu = service.generateMenu("smoke-user", new PersonalizedMenuRequest(
-                "qwen", 40, "female", 165, 60, "", "", "maintain", "normal",
+                "qwen", 40, "female", 165, 60, "", "", "maintain", "均衡三餐", "normal",
                 List.of(), List.of(), null, 30, List.of("炒锅"), 1800, 80, 220, 55,
                 "2026-08-11"
         ));
