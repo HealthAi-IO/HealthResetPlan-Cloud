@@ -50,7 +50,7 @@ app:
       read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
   ai:
     # 未指定模型时使用列表首项；请求失败不会跨模型自动降级
-    chat-order: [doubao, qwen, glm, deepseek]
+    chat-order: [qwen]
     # 体检报告 OCR 使用的视觉模型厂商
     vision-provider: qwen
     # 单用户每日最大 AI 请求次数

@@ -1,0 +1,17 @@
+package io.healthresetplan.modules.captcha.dto;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
+
+import java.util.List;
+
+public record CaptchaVerifyRequest(
+        @NotBlank(message = "captchaId is required") String captchaId,
+        @NotBlank(message = "scene is required") String scene,
+        @NotBlank(message = "principal is required") String principal,
+        double finalX,
+        @NotNull @Size(min = 6, max = 300, message = "请对准缺口并平稳滑动后再试")
+        List<@Valid CaptchaTrajectoryPoint> trajectory) {
+}

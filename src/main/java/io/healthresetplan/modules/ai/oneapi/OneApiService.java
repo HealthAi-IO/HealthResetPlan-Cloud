@@ -437,10 +437,12 @@ public class OneApiService {
 
     List<String> providerSelection(String preferredProvider) {
         LinkedHashSet<String> providers = new LinkedHashSet<>();
-        if (preferredProvider != null && !preferredProvider.isBlank()) {
+        List<String> enabledProviders = props.getChatOrder();
+        if (preferredProvider != null && !preferredProvider.isBlank()
+                && enabledProviders.contains(preferredProvider.trim())) {
             providers.add(preferredProvider.trim());
         }
-        providers.addAll(props.getChatOrder());
+        providers.addAll(enabledProviders);
         providers.removeIf(provider -> provider == null || provider.isBlank());
         return List.copyOf(providers);
     }

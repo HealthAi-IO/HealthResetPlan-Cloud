@@ -39,6 +39,15 @@ class OneApiServiceVisionTests {
     }
 
     @Test
+    void providerSelectionIgnoresDisabledPreferredModel() {
+        OneApiProperties properties = new OneApiProperties();
+        properties.setChatOrder(List.of("qwen"));
+        OneApiService service = new OneApiService(properties, null);
+
+        assertEquals(List.of("qwen"), service.providerSelection("doubao"));
+    }
+
+    @Test
     void structuredOutputDisablesThinkingForVolcengineProviders() {
         assertTrue(OneApiService.isVolcengineProvider("doubao"));
         assertTrue(OneApiService.isVolcengineProvider("glm"));

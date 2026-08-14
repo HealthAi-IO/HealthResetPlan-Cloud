@@ -63,14 +63,6 @@ public class AiPlanService {
             5. 不承诺减重效果，不推荐极端训练，不为急性不适或禁忌人群强行安排运动。
             """;
 
-    private static final String REPAIR_PROMPT = """
-            你是 JSON 格式修复器。把用户提供的运动计划修复为纯 JSON，不要 Markdown，不要解释，不新增饮食、药物或诊疗建议。
-            根对象必须包含 summary、keyFocus、riskAlert、days；days 必须正好 7 条。
-            每条 day 必须包含 dayIndex、weekDay、exercise、measurements、habits、reminders。exercise 必须包含 title、goal、totalMinutes、intensity、location、equipment、warmup、main、cooldown、safetyNotes、alternative。
-            warmup、main、cooldown、safetyNotes、equipment、measurements、habits、reminders 必须是数组，alternative 必须是对象。
-            保留原计划的运动内容，只修正字段名、缺失字段、数据类型和天数。
-            """;
-
     private final OneApiService oneApiService;
     private final MembershipService membershipService;
     private final OneApiProperties oneApiProperties;
@@ -148,30 +140,9 @@ public class AiPlanService {
             return new AiPlanResponse(completion.provider(), normalized, 0, 0);
         }
 
-        log.warn("AI plan JSON invalid userId={} provider={} reason={}, retrying repair",
+        log.warn("AI plan JSON invalid userId={} provider={} reason={}, trying fallback provider",
                 userId, completion.provider(), validationError);
-        OneApiService.AiCompletion repaired = oneApiService.completeJsonWithExactProvider(
-                userId,
-                List.of(
-                        OneApiService.systemMsg(REPAIR_PROMPT),
-                        OneApiService.userMsg(rawJson)
-                ),
-                completion.provider(),
-                maxCompletionTokens);
-        rawJson = extractJson(repaired.content());
-        validationError = planValidationError(rawJson);
-        if (validationError != null) {
-            normalized = normalizePlan(rawJson);
-            if (normalized != null && planValidationError(normalized) == null) {
-                log.info("AI 计划修复结果本地归一化成功 provider={}", repaired.provider());
-                return new AiPlanResponse(repaired.provider(), normalized, 0, 0);
-            }
-            log.warn("AI plan JSON repair failed userId={} provider={} reason={}",
-                    userId, repaired.provider(), validationError);
-            return null;
-        }
-        log.info("AI 计划修复成功 provider={}", repaired.provider());
-        return new AiPlanResponse(repaired.provider(), rawJson, 0, 0);
+        return null;
     }
 
     private String normalizePlan(String rawJson) {
@@ -354,8 +325,11 @@ public class AiPlanService {
 
     private List<String> planProviders(String preferredProvider) {
         LinkedHashSet<String> providers = new LinkedHashSet<>();
-        providers.add(preferredProvider);
-        providers.addAll(List.of("qwen", "glm", "deepseek", "doubao"));
+        List<String> enabledProviders = oneApiProperties.getChatOrder();
+        if (preferredProvider != null && enabledProviders.contains(preferredProvider)) {
+            providers.add(preferredProvider);
+        }
+        providers.addAll(enabledProviders);
         providers.removeIf(provider -> provider == null || provider.isBlank());
         return List.copyOf(providers);
     }

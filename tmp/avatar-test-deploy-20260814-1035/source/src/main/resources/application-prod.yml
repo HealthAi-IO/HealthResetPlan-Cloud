@@ -1,0 +1,87 @@
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+app:
+  admin:
+    bootstrap-password: ${ADMIN_BOOTSTRAP_PASSWORD:}
+  data-encryption:
+    key: ${DATA_ENCRYPTION_KEY}
+    key-version: ${DATA_ENCRYPTION_KEY_VERSION:1}
+  web-push:
+    enabled: ${WEB_PUSH_ENABLED:false}
+    public-key: ${WEB_PUSH_PUBLIC_KEY:}
+    private-key: ${WEB_PUSH_PRIVATE_KEY:}
+    subject: ${WEB_PUSH_SUBJECT:mailto:support@jkcqplan.com}
+  oss:
+    access-key-id: ${JDCLOUD_OSS_ACCESS_KEY_ID}
+    secret-access-key: ${JDCLOUD_OSS_SECRET_ACCESS_KEY}
+    region: ${JDCLOUD_OSS_REGION:cn-north-1}
+    endpoint: ${JDCLOUD_OSS_ENDPOINT:https://s3-internal.cn-north-1.jdcloud-oss.com}
+    bucket: ${JDCLOUD_OSS_BUCKET:health-reset-plan-private}
+  jwt:
+    secret: ${JWT_SECRET}
+    access-ttl-minutes: 60
+    refresh-ttl-days: 30
+  sms:
+    enabled: ${SMS_ENABLED:false}
+    debug-code-enabled: ${SMS_DEBUG_CODE_ENABLED:false}
+    provider: jdcloud
+    region-id: ${SMS_REGION_ID:cn-north-1}
+    code-ttl-seconds: ${SMS_CODE_TTL_SECONDS:600}
+    resend-interval-seconds: ${SMS_RESEND_INTERVAL_SECONDS:60}
+    max-per-phone-per-hour: ${SMS_MAX_PER_PHONE_PER_HOUR:5}
+    max-per-phone-per-day: ${SMS_MAX_PER_PHONE_PER_DAY:20}
+    jdcloud:
+      access-key-id: ${JDCLOUD_ACCESS_KEY_ID:}
+      secret-access-key: ${JDCLOUD_SECRET_ACCESS_KEY:}
+      sign-id: ${JDCLOUD_SMS_SIGN_ID:}
+      template-id: ${JDCLOUD_SMS_TEMPLATE_ID:mb_cd5b4c717b484fa9a89c79de263782bf}
+      endpoint: ${JDCLOUD_SMS_ENDPOINT:sms.jdcloud-api.com}
+      connect-timeout-millis: ${JDCLOUD_SMS_CONNECT_TIMEOUT_MILLIS:3000}
+      read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
+  ai:
+    chat-order: [doubao, qwen, glm, deepseek]
+    vision-provider: ${AI_CHAT_VISION_PROVIDER:qwen}
+    daily-limit: ${AI_CHAT_DAILY_LIMIT:30}
+    timeout-seconds: ${AI_CHAT_TIMEOUT_SECONDS:120}
+    plan-cache-minutes: ${AI_PLAN_CACHE_MINUTES:30}
+    plan-max-completion-tokens: ${AI_PLAN_MAX_COMPLETION_TOKENS:8192}
+    providers:
+      deepseek:
+        base-url: ${AI_CHAT_DEEPSEEK_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
+        model: ${AI_CHAT_DEEPSEEK_MODEL:deepseek-v4-pro-260425}
+        api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
+      doubao:
+        base-url: ${AI_CHAT_DOUBAO_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
+        model: ${AI_CHAT_DOUBAO_MODEL:doubao-seed-2-1-pro-260628}
+        api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
+      glm:
+        base-url: ${AI_CHAT_GLM_API_BASE:https://ark.cn-beijing.volces.com/api/v3}
+        model: ${AI_CHAT_GLM_MODEL:glm-5-2-260617}
+        api-key: ${AI_CHAT_VOLCENGINE_API_KEY}
+      qwen:
+        base-url: ${AI_CHAT_QWEN_API_BASE:https://dashscope.aliyuncs.com/compatible-mode/v1}
+        model: ${AI_CHAT_QWEN_MODEL:qwen3.7-plus}
+        api-key: ${AI_CHAT_QWEN_API_KEY}
+
+logging:
+  level:
+    root: INFO
+    io.healthresetplan: INFO
+
+server:
+  forward-headers-strategy: framework

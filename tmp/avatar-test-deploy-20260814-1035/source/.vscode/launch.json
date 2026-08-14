@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "后端启动",
+      "request": "launch",
+      "mainClass": "io.healthresetplan.HealthResetPlanApplication",
+      "projectName": "health-reset-plan-cloud",
+      "vmArgs": "-Dspring.profiles.active=dev,local -Dfile.encoding=UTF-8"
+    },
+    {
+      "type": "java",
+      "name": "后端调试",
+      "request": "launch",
+      "mainClass": "io.healthresetplan.HealthResetPlanApplication",
+      "projectName": "health-reset-plan-cloud",
+      "vmArgs": "-Dspring.profiles.active=dev,local -Dfile.encoding=UTF-8",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "dev,local"
+      }
+    }
+  ]
+}

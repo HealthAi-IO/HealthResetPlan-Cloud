@@ -36,7 +36,7 @@ app:
     enabled: ${SMS_ENABLED:false}
     debug-code-enabled: ${SMS_DEBUG_CODE_ENABLED:false}
   ai:
-    chat-order: [doubao, qwen, glm, deepseek]
+    chat-order: [qwen]
     vision-provider: ${AI_CHAT_VISION_PROVIDER:qwen}
     daily-limit: ${AI_CHAT_DAILY_LIMIT:30}
     timeout-seconds: ${AI_CHAT_TIMEOUT_SECONDS:120}

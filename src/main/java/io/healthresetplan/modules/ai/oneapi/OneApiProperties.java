@@ -15,7 +15,7 @@ import java.util.Map;
  * <pre>
  * app:
  *   ai:
- *     chat-order: [doubao, qwen, glm, deepseek]   # 首项为默认对话模型
+ *     chat-order: [qwen]                      # 当前启用的模型，首项为默认模型
  *     vision-provider: qwen                   # OCR 视觉模型
  *     daily-limit: 30
  *     timeout-seconds: 90
@@ -45,8 +45,8 @@ public class OneApiProperties {
     /** 各厂商配置，key 为厂商名（qwen / doubao / deepseek 等） */
     private Map<String, ProviderConfig> providers = new HashMap<>();
 
-    /** 未指定模型时使用列表首项，不用于跨模型自动降级。 */
-    private List<String> chatOrder = List.of("qwen", "doubao", "glm", "deepseek");
+    /** 当前允许运行的模型及调用顺序。 */
+    private List<String> chatOrder = List.of("qwen");
 
     /** 视觉模型厂商（体检报告 OCR） */
     private String visionProvider = "qwen";

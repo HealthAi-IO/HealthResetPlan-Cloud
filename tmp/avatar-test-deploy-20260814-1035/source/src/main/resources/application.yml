@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: health-reset-plan-cloud
+  config:
+    import: optional:file:${HEALTH_LOCAL_CONFIG:./application-local.yml}
+  profiles:
+    active: dev,local
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 50MB
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+  compression:
+    enabled: true
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  mapper-locations: classpath*:mapper/**/*.xml
+  global-config:
+    db-config:
+      id-type: ASSIGN_ID
+      logic-delete-field: deletedAt
+      logic-delete-value: NOW()
+      logic-not-delete-value: 'NULL'
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  file:
+    path: ${LOG_PATH:./logs}
+    name: ${LOG_FILE:${logging.file.path}/${spring.application.name}.log}
+  logback:
+    rollingpolicy:
+      file-name-pattern: ${LOG_FILE_PATTERN:${logging.file.path}/${spring.application.name}.%d{yyyy-MM-dd}.%i.log.gz}
+      max-file-size: ${LOG_MAX_FILE_SIZE:20MB}
+      max-history: ${LOG_MAX_HISTORY:30}
+      total-size-cap: ${LOG_TOTAL_SIZE_CAP:2GB}
+  level:
+    io.healthresetplan: INFO
+    org.springframework.security: INFO

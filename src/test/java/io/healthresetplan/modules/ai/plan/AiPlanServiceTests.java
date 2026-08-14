@@ -15,14 +15,14 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AiPlanServiceTests {
 
     @Test
-    void invalidPlanIsRepairedByTheSameProvider() {
+    void disabledPreferredProviderIsIgnored() {
         OneApiService oneApiService = mock(OneApiService.class);
         AiUsageLimiter usageLimiter = mock(AiUsageLimiter.class);
         OneApiProperties properties = new OneApiProperties();
@@ -33,20 +33,20 @@ class AiPlanServiceTests {
                 usageLimiter);
         String validPlan = validPlan();
         when(oneApiService.completeJsonWithExactProvider(
-                anyString(), anyList(), eq("glm"), anyLong()))
-                .thenReturn(new OneApiService.AiCompletion("glm", "{\"days\":[]}"))
-                .thenReturn(new OneApiService.AiCompletion("glm", validPlan));
+                anyString(), anyList(), eq("qwen"), anyLong()))
+                .thenReturn(new OneApiService.AiCompletion("qwen", validPlan));
 
         AiPlanResponse response = service.generate("user-1", request("glm"));
 
-        assertEquals("glm", response.provider());
-        assertEquals(validPlan.trim(), response.rawJson());
-        verify(oneApiService, times(2)).completeJsonWithExactProvider(
+        assertEquals("qwen", response.provider());
+        verify(oneApiService, never()).completeJsonWithExactProvider(
                 anyString(), anyList(), eq("glm"), anyLong());
+        verify(oneApiService).completeJsonWithExactProvider(
+                anyString(), anyList(), eq("qwen"), anyLong());
     }
 
     @Test
-    void invalidPlanFallsBackToAnotherProvider() {
+    void invalidQwenPlanReturnsLocalSafePlanWithoutCrossProviderFallback() {
         OneApiService oneApiService = mock(OneApiService.class);
         AiUsageLimiter usageLimiter = mock(AiUsageLimiter.class);
         AiPlanService service = new AiPlanService(
@@ -54,18 +54,14 @@ class AiPlanServiceTests {
                 mock(MembershipService.class),
                 new OneApiProperties(),
                 usageLimiter);
-        String validPlan = validPlan();
-        when(oneApiService.completeJsonWithExactProvider(
-                anyString(), anyList(), eq("doubao"), anyLong()))
-                .thenReturn(new OneApiService.AiCompletion("doubao", "not-json"));
         when(oneApiService.completeJsonWithExactProvider(
                 anyString(), anyList(), eq("qwen"), anyLong()))
-                .thenReturn(new OneApiService.AiCompletion("qwen", validPlan));
+                .thenReturn(new OneApiService.AiCompletion("qwen", "not-json"));
 
         AiPlanResponse response = service.generate("user-1", request("doubao"));
 
-        assertEquals("qwen", response.provider());
-        verify(oneApiService, times(2)).completeJsonWithExactProvider(
+        assertEquals("local", response.provider());
+        verify(oneApiService, never()).completeJsonWithExactProvider(
                 anyString(), anyList(), eq("doubao"), anyLong());
         verify(oneApiService).completeJsonWithExactProvider(
                 anyString(), anyList(), eq("qwen"), anyLong());
@@ -94,10 +90,12 @@ class AiPlanServiceTests {
     @ValueSource(strings = {"qwen", "glm", "deepseek", "doubao"})
     void commonProviderShapeDifferencesAreNormalized(String provider) {
         OneApiService oneApiService = mock(OneApiService.class);
+        OneApiProperties properties = new OneApiProperties();
+        properties.setChatOrder(java.util.List.of(provider));
         AiPlanService service = new AiPlanService(
                 oneApiService,
                 mock(MembershipService.class),
-                new OneApiProperties(),
+                properties,
                 mock(AiUsageLimiter.class));
         String compactPlan = validPlan()
                 .replace("\"summary\":\"7 天运动计划\",", "")
@@ -114,7 +112,7 @@ class AiPlanServiceTests {
     }
 
     @Test
-    void invalidPlanFallsBackToEveryConfiguredProviderInOrder() {
+    void invalidPlanUsesOnlyEnabledProvider() {
         OneApiService oneApiService = mock(OneApiService.class);
         AiPlanService service = new AiPlanService(
                 oneApiService,
@@ -129,8 +127,10 @@ class AiPlanServiceTests {
         AiPlanResponse response = service.generate("user-1", request("doubao"));
 
         assertEquals("local", response.provider());
-        for (String provider : new String[]{"doubao", "qwen", "glm", "deepseek"}) {
-            verify(oneApiService, times(2)).completeJsonWithExactProvider(
+        verify(oneApiService).completeJsonWithExactProvider(
+                anyString(), anyList(), eq("qwen"), anyLong());
+        for (String provider : new String[]{"doubao", "glm", "deepseek"}) {
+            verify(oneApiService, never()).completeJsonWithExactProvider(
                     anyString(), anyList(), eq(provider), anyLong());
         }
     }

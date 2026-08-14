@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS sync_record (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id VARCHAR(64) NOT NULL,
+  table_name VARCHAR(64) NOT NULL,
+  client_id VARCHAR(64) NOT NULL,
+  payload_cipher LONGTEXT NOT NULL,
+  payload_iv VARCHAR(128) NOT NULL,
+  payload_tag VARCHAR(128) NOT NULL,
+  alg VARCHAR(64) NOT NULL DEFAULT 'aes-256-gcm:v1',
+  meta_json JSON NULL,
+  device_id VARCHAR(128) NOT NULL DEFAULT '',
+  client_updated_at DATETIME(3) NOT NULL,
+  server_updated_at DATETIME(3) NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  updated_at DATETIME(3) NOT NULL,
+  deleted_at DATETIME(3) NULL,
+  version BIGINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_sync_record_user_table_client (user_id, table_name, client_id),
+  KEY idx_sync_record_user_since (user_id, server_updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

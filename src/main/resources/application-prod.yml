@@ -54,7 +54,7 @@ app:
       connect-timeout-millis: ${JDCLOUD_SMS_CONNECT_TIMEOUT_MILLIS:3000}
       read-timeout-millis: ${JDCLOUD_SMS_READ_TIMEOUT_MILLIS:5000}
   ai:
-    chat-order: [doubao, qwen, glm, deepseek]
+    chat-order: [qwen]
     vision-provider: ${AI_CHAT_VISION_PROVIDER:qwen}
     daily-limit: ${AI_CHAT_DAILY_LIMIT:30}
     timeout-seconds: ${AI_CHAT_TIMEOUT_SECONDS:120}

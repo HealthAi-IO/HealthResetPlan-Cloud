@@ -1,0 +1,14 @@
+{
+  "java.jdt.ls.java.home": "D:\\HuaweiMoveData\\Users\\Tong\\Desktop\\WeiLingJi\\Health\\tools\\jdk17\\jdk-17.0.19+10",
+  "spring-boot.ls.java.home": "D:\\HuaweiMoveData\\Users\\Tong\\Desktop\\WeiLingJi\\Health\\tools\\jdk17\\jdk-17.0.19+10",
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-17",
+      "path": "D:\\HuaweiMoveData\\Users\\Tong\\Desktop\\WeiLingJi\\Health\\tools\\jdk17\\jdk-17.0.19+10",
+      "default": true
+    }
+  ],
+  "maven.executable.path": "D:\\HuaweiMoveData\\Users\\Tong\\Desktop\\WeiLingJi\\Health\\tools\\maven\\apache-maven-3.9.9\\bin\\mvn.cmd",
+  "java.import.maven.globalSettings": "D:\\HuaweiMoveData\\Users\\Tong\\Desktop\\WeiLingJi\\Health\\tools\\maven\\apache-maven-3.9.9\\conf\\settings.xml",
+  "java.import.maven.enabled": true
+}
