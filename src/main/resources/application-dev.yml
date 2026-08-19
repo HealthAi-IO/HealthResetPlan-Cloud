@@ -12,6 +12,13 @@ spring:
     encoding: UTF-8
 
 app:
+  payment:
+    order-expire-minutes: ${PAYMENT_ORDER_EXPIRE_MINUTES:15}
+    refund-window-days: ${PAYMENT_REFUND_WINDOW_DAYS:7}
+    wechat:
+      enabled: ${WECHAT_PAY_ENABLED:false}
+    alipay:
+      enabled: ${ALIPAY_ENABLED:false}
   web-push:
     enabled: ${WEB_PUSH_ENABLED:false}
     public-key: ${WEB_PUSH_PUBLIC_KEY:}

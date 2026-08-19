@@ -13,6 +13,8 @@ import io.healthresetplan.modules.auth.dto.SmsLoginCodeRequest;
 import io.healthresetplan.modules.auth.dto.SmsLoginRequest;
 import io.healthresetplan.modules.auth.dto.SetPasswordRequest;
 import io.healthresetplan.modules.auth.dto.TokenResponse;
+import io.healthresetplan.modules.auth.dto.SocialLoginRequest;
+import io.healthresetplan.modules.auth.dto.SocialPhoneVerifyRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -26,9 +28,21 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final SocialAuthService socialAuthService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, SocialAuthService socialAuthService) {
         this.authService = authService;
+        this.socialAuthService = socialAuthService;
+    }
+
+    @PostMapping("/social/wechat")
+    public R<java.util.Map<String, Object>> wechat(@Valid @RequestBody SocialLoginRequest req, HttpServletRequest httpReq) {
+        return R.ok(socialAuthService.startWechat(req.getCode(), httpReq));
+    }
+
+    @PostMapping("/social/verify-phone")
+    public R<TokenResponse> verifySocialPhone(@Valid @RequestBody SocialPhoneVerifyRequest req, HttpServletRequest httpReq) {
+        return R.ok(socialAuthService.verifyPhone(req, httpReq));
     }
 
     @PostMapping("/sms/register")

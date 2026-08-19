@@ -267,6 +267,10 @@ public class AuthService {
         return buildTokensAndSession(userId, httpReq);
     }
 
+    public TokenResponse issueTokensForSocial(String userId, HttpServletRequest httpReq) {
+        return buildTokensAndSession(userId, httpReq);
+    }
+
     @Transactional
     public void logout(String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
@@ -518,7 +522,7 @@ public class AuthService {
                 .eq(UserCredential::getIdentifierHash, HashUtils.sha256Hex(identifier)));
     }
 
-    private String createPhoneAccount(String phone, String nickname) {
+    public String createPhoneAccount(String phone, String nickname, String agreementVersion) {
         String userId = generateUserId();
         LocalDateTime now = LocalDateTime.now();
 
@@ -526,7 +530,8 @@ public class AuthService {
         account.setUserId(userId);
         account.setCustomId(userId);
         account.setPhoneTail(phoneTail("phone", phone));
-        account.setNickname(nickname != null && !nickname.isBlank() ? nickname.trim() : "健康用户");
+        String displayName = nickname != null && !nickname.isBlank() ? nickname.trim() : "健康用户";
+        account.setNickname(displayName.length() > 64 ? displayName.substring(0, 64) : displayName);
         account.setStatus(1);
         account.setRoleCode("user");
         account.setHasCloudSync(0);
@@ -542,6 +547,8 @@ public class AuthService {
         credential.setCreatedAt(now);
         credential.setUpdatedAt(now);
         credentialMapper.insert(credential);
+        jdbc.update("INSERT INTO user_registration_consent (user_id, agreement_version, accepted_at) VALUES (?, ?, ?)",
+                userId, agreementVersion == null || agreementVersion.isBlank() ? "2026-08-19" : agreementVersion, now);
 
         return userId;
     }

@@ -107,6 +107,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers(
                                 "/api/v1/auth/**",
+                                "/api/v1/payments/wechat/notify",
+                                "/api/v1/payments/alipay/notify",
                                 "/api/v1/content/assets",
                                 "/api/v1/releases/check",
                                 "/api/v1/releases/latest",

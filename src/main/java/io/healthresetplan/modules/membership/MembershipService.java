@@ -1,15 +1,34 @@
 package io.healthresetplan.modules.membership;
 
+import io.healthresetplan.common.exception.BusinessException;
+import io.healthresetplan.modules.payment.PaymentService;
 import org.springframework.stereotype.Service;
 
 /**
- * Compatibility boundary for features that require an authenticated account.
- * All logged-in users have access; this class deliberately contains no billing state.
+ * Central billing/credit boundary for AI features.
  */
 @Service
 public class MembershipService {
 
+    private final PaymentService paymentService;
+
+    public MembershipService(PaymentService paymentService) {
+        this.paymentService = paymentService;
+    }
+
     public boolean hasFeature(String userId, String feature) {
-        return userId != null && !userId.isBlank();
+        return userId != null && !userId.isBlank() && paymentService.hasAvailable(userId);
+    }
+
+    public boolean billingEnabled() { return true; }
+
+    public boolean consume(String userId, String feature) {
+        return paymentService.consume(userId, feature);
+    }
+
+    public void requireCredit(String userId, String feature) {
+        if (!hasFeature(userId, feature)) {
+            throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+        }
     }
 }

@@ -103,14 +103,14 @@ public class AiPlanService {
                 try {
                     AiPlanResponse response = generateWithProvider(
                             userId, messages, provider, maxCompletionTokens);
-                    if (response != null) return response;
+                    if (response != null) return chargeCredit(userId, response);
                 } catch (BusinessException e) {
                     log.warn("AI plan provider failed userId={} provider={} code={}",
                             userId, provider, e.getCode());
                 }
             }
             log.warn("All AI plan providers failed userId={}, using local safe plan", userId);
-            return new AiPlanResponse("local", localSafePlan(req), 0, 0);
+            return chargeCredit(userId, new AiPlanResponse("local", localSafePlan(req), 0, 0));
         } catch (RuntimeException e) {
             usageLimiter.release(userId, AiUsageLimiter.Type.PLAN);
             throw e;
@@ -118,6 +118,13 @@ public class AiPlanService {
     }
 
     // ── 内部 ─────────────────────────────────────────────────────
+
+    private AiPlanResponse chargeCredit(String userId, AiPlanResponse response) {
+        if (membershipService.billingEnabled() && !membershipService.consume(userId, "ai_plan")) {
+            throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+        }
+        return response;
+    }
 
     private AiPlanResponse generateWithProvider(
             String userId,

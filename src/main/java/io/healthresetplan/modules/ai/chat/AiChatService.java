@@ -52,6 +52,7 @@ public class AiChatService {
         try {
             List<ChatCompletionMessageParam> msgs = buildMessages(req);
             String content = oneApiService.complete(userId, msgs, req.provider());
+            consumeCredit(userId, "ai_chat");
             return new AiChatResponse(
                     req.provider() == null || req.provider().isBlank() ? "oneapi" : req.provider(),
                     content,
@@ -80,7 +81,10 @@ public class AiChatService {
         usageLimiter.consume(userId, AiUsageLimiter.Type.CHAT);
         try {
             List<ChatCompletionMessageParam> msgs = buildMessages(req);
-            oneApiService.stream(userId, msgs, req.provider(), tokenConsumer, onDone);
+            oneApiService.stream(userId, msgs, req.provider(), tokenConsumer, () -> {
+                consumeCredit(userId, "ai_chat");
+                onDone.run();
+            });
         } catch (RuntimeException e) {
             usageLimiter.release(userId, AiUsageLimiter.Type.CHAT);
             throw e;
@@ -101,7 +105,13 @@ public class AiChatService {
 
     private void checkMembership(String userId) {
         if (!membershipService.hasFeature(userId, "ai_chat")) {
-            throw new BusinessException(40301, "请先登录手机号账号");
+            throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+        }
+    }
+
+    private void consumeCredit(String userId, String feature) {
+        if (!membershipService.consume(userId, feature)) {
+            throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
         }
     }
 

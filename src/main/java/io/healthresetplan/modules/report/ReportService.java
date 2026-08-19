@@ -7,6 +7,7 @@ import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.modules.ai.AiUsageLimiter;
 import io.healthresetplan.modules.ai.MedicalRiskGuard;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
+import io.healthresetplan.modules.membership.MembershipService;
 import io.healthresetplan.modules.report.dto.AnalyzeResponse;
 import io.healthresetplan.modules.report.dto.ReportSaveRequest;
 import io.healthresetplan.modules.report.entity.HealthReport;
@@ -96,12 +97,14 @@ public class ReportService {
     private final HealthReportMapper reportMapper;
     private final OneApiService oneApiService;
     private final AiUsageLimiter usageLimiter;
+    private final MembershipService membershipService;
 
     public ReportService(HealthReportMapper reportMapper, OneApiService oneApiService,
-                         AiUsageLimiter usageLimiter) {
+                         AiUsageLimiter usageLimiter, MembershipService membershipService) {
         this.reportMapper = reportMapper;
         this.oneApiService = oneApiService;
         this.usageLimiter = usageLimiter;
+        this.membershipService = membershipService;
     }
 
     public AnalyzeResponse analyze(MultipartFile file, String userId) {
@@ -117,6 +120,7 @@ public class ReportService {
         if (file.getSize() > MAX_SIZE_BYTES) {
             throw new BusinessException(40001, "图片大小不能超过 10MB");
         }
+        membershipService.requireCredit(userId, "report_ocr");
         log.info("Report OCR accepted mimeType={} sizeBytes={}", mimeType, file.getSize());
 
         byte[] bytes;
@@ -136,7 +140,7 @@ public class ReportService {
                     completion.content().length());
             AnalyzeResponse result = tryParseResult(completion.content(), completion.label());
             if (hasAllIndicators(result)) {
-                return result;
+                return consumeCredit(userId, result);
             }
 
             log.warn("Report OCR result incomplete, retrying once sourceRowCount={} indicatorCount={}",
@@ -147,7 +151,7 @@ public class ReportService {
             if (hasAllIndicators(retryResult)) {
                 log.info("Report OCR retry completed elapsedMs={} indicatorCount={}",
                         System.currentTimeMillis() - startedAt, indicatorCount(retryResult));
-                return retryResult;
+                return consumeCredit(userId, retryResult);
             }
             result = betterPartialResult(result, retryResult);
             if (hasUsableContent(result)) {
@@ -156,7 +160,7 @@ public class ReportService {
                 log.warn("Report OCR returning partial result elapsedMs={} sourceRowCount={} indicatorCount={}",
                         System.currentTimeMillis() - startedAt,
                         sourceRowCount(result), indicatorCount(result));
-                return result;
+                return consumeCredit(userId, result);
             }
             log.warn("Report OCR failed without usable content elapsedMs={}",
                     System.currentTimeMillis() - startedAt);
@@ -167,6 +171,13 @@ public class ReportService {
             usageLimiter.release(userId, AiUsageLimiter.Type.REPORT);
             throw e;
         }
+    }
+
+    private AnalyzeResponse consumeCredit(String userId, AnalyzeResponse response) {
+        if (!membershipService.consume(userId, "report_ocr")) {
+            throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+        }
+        return response;
     }
 
     @Transactional

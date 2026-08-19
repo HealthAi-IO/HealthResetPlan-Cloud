@@ -68,6 +68,18 @@ public class FileStorageService {
         return objectKey;
     }
 
+    public String storeRemoteAvatar(byte[] data, String contentType, String userId) {
+        if (data == null || data.length == 0 || data.length > 2 * 1024 * 1024L) {
+            throw new BusinessException(40001, "第三方头像大小无效");
+        }
+        validateImage(contentType, data);
+        String extension = imageExtension(contentType);
+        String objectKey = "avatars/" + userId + "/" + java.util.UUID.randomUUID() + extension + ".enc";
+        putEncrypted(objectKey, data, userId);
+        return "/api/v1/files/avatar?objectKey="
+                + URLEncoder.encode(objectKey, StandardCharsets.UTF_8);
+    }
+
     public String canonicalAvatarUrl(String avatarUrl, String userId) {
         String objectKey = avatarObjectKey(avatarUrl);
         requireAvatarOwnership(objectKey, userId);
