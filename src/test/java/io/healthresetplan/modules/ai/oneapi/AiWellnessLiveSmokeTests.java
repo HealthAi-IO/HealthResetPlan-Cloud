@@ -5,6 +5,7 @@ import io.healthresetplan.modules.ai.wellness.AiWellnessResponse;
 import io.healthresetplan.modules.ai.wellness.AiWellnessService;
 import io.healthresetplan.modules.ai.wellness.PersonalizedMenuRequest;
 import io.healthresetplan.modules.ai.wellness.WeeklyHealthReportRequest;
+import io.healthresetplan.modules.membership.MembershipService;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -38,9 +39,12 @@ class AiWellnessLiveSmokeTests {
         when(jdbc.queryForList(anyString())).thenReturn(List.of());
         OneApiService oneApi = new OneApiService(properties, jdbc);
         oneApi.reloadClients();
+        MembershipService membership = mock(MembershipService.class);
+        when(membership.consume(anyString(), anyString())).thenReturn(true);
         AiWellnessService service = new AiWellnessService(
                 oneApi,
-                mock(AiUsageLimiter.class)
+                mock(AiUsageLimiter.class),
+                membership
         );
 
         AiWellnessResponse menu = service.generateMenu("smoke-user", new PersonalizedMenuRequest(

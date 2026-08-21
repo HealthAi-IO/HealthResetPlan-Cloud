@@ -8,6 +8,9 @@ import io.healthresetplan.modules.user.entity.UserCredential;
 import io.healthresetplan.modules.user.mapper.UserAccountMapper;
 import io.healthresetplan.modules.user.mapper.UserCredentialMapper;
 import io.healthresetplan.modules.files.FileStorageService;
+import io.healthresetplan.modules.auth.SocialAuthService;
+import io.healthresetplan.modules.auth.dto.SocialLoginRequest;
+import jakarta.validation.Valid;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -21,14 +24,17 @@ public class UserController {
     private final UserAccountMapper accountMapper;
     private final UserCredentialMapper credentialMapper;
     private final FileStorageService fileStorageService;
+    private final SocialAuthService socialAuthService;
 
     public UserController(
             UserAccountMapper accountMapper,
             UserCredentialMapper credentialMapper,
-            FileStorageService fileStorageService) {
+            FileStorageService fileStorageService,
+            SocialAuthService socialAuthService) {
         this.accountMapper = accountMapper;
         this.credentialMapper = credentialMapper;
         this.fileStorageService = fileStorageService;
+        this.socialAuthService = socialAuthService;
     }
 
     @GetMapping("/me")
@@ -40,6 +46,7 @@ public class UserController {
             return R.fail(40401, "用户不存在");
         }
         boolean hasPassword = hasPassword(userId);
+        boolean hasWechat = hasCredential(userId, "wechat");
         return R.ok(Map.of(
                 "userId", account.getUserId(),
                 "customId", account.getCustomId() != null ? account.getCustomId() : account.getUserId(),
@@ -47,8 +54,16 @@ public class UserController {
                 "nickname", account.getNickname(),
                 "avatarUrl", account.getAvatarUrl() != null ? account.getAvatarUrl() : "",
                 "hasCloudSync", true,
-                "hasPassword", hasPassword
+                "hasPassword", hasPassword,
+                "hasWechat", hasWechat
         ));
+    }
+
+    @PostMapping("/me/wechat")
+    public R<Void> bindWechat(@Valid @RequestBody SocialLoginRequest req) {
+        String userId = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        socialAuthService.bindWechat(userId, req.getCode());
+        return R.ok();
     }
 
     @PutMapping("/me")
@@ -95,6 +110,7 @@ public class UserController {
         account = accountMapper.selectOne(new LambdaQueryWrapper<UserAccount>()
                 .eq(UserAccount::getUserId, userId));
         boolean hasPassword = hasPassword(userId);
+        boolean hasWechat = hasCredential(userId, "wechat");
 
         return R.ok(Map.of(
                 "userId", account != null ? account.getUserId() : userId,
@@ -103,7 +119,8 @@ public class UserController {
                 "nickname", account != null ? account.getNickname() : "",
                 "avatarUrl", account != null && account.getAvatarUrl() != null ? account.getAvatarUrl() : "",
                 "hasCloudSync", true,
-                "hasPassword", hasPassword
+                "hasPassword", hasPassword,
+                "hasWechat", hasWechat
         ));
     }
 
@@ -115,6 +132,12 @@ public class UserController {
         return credential != null
                 && credential.getSecretHash() != null
                 && !credential.getSecretHash().isBlank();
+    }
+
+    private boolean hasCredential(String userId, String type) {
+        return credentialMapper.selectCount(new LambdaQueryWrapper<UserCredential>()
+                .eq(UserCredential::getUserId, userId)
+                .eq(UserCredential::getCredType, type)) > 0;
     }
 
     private void deleteReplacedAvatar(String previous, String next, String userId) {

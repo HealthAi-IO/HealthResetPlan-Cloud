@@ -40,7 +40,8 @@ public class WechatGateway implements PaymentGateway {
         PaymentProperties.Wechat config = properties.getWechat();
         return config.isEnabled() && !blank(config.getAppId()) && !blank(config.getMerchantId())
                 && !blank(config.getMerchantSerialNumber()) && !blank(config.getPrivateKeyPath())
-                && !blank(config.getPlatformCertificatePath()) && config.getApiV3Key().length() == 32;
+                && !blank(config.getPlatformPublicKeyPath()) && !blank(config.getPlatformPublicKeyId())
+                && config.getApiV3Key().length() == 32;
     }
 
     @Override
@@ -103,7 +104,9 @@ public class WechatGateway implements PaymentGateway {
         String timestamp = header(headers, "wechatpay-timestamp");
         String nonce = header(headers, "wechatpay-nonce");
         String signature = header(headers, "wechatpay-signature");
-        if (blank(timestamp) || blank(nonce) || blank(signature)
+        String serial = header(headers, "wechatpay-serial");
+        if (!properties.getWechat().getPlatformPublicKeyId().equals(serial)
+                || blank(timestamp) || blank(nonce) || blank(signature)
                 || !PaymentCrypto.verify(timestamp + "\n" + nonce + "\n" + body + "\n", signature,
                 platformPublicKey())) {
             throw new IllegalArgumentException("微信支付回调签名无效");
@@ -161,6 +164,7 @@ public class WechatGateway implements PaymentGateway {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new IllegalStateException("微信支付接口返回 " + response.statusCode());
             }
+            verifyResponse(response);
             return objectMapper.readTree(response.body());
         } catch (Exception ex) {
             throw new IllegalStateException("微信支付请求失败", ex);
@@ -181,7 +185,20 @@ public class WechatGateway implements PaymentGateway {
     }
 
     private PublicKey platformPublicKey() {
-        return PaymentCrypto.publicKey(properties.getWechat().getPlatformCertificatePath());
+        return PaymentCrypto.publicKey(properties.getWechat().getPlatformPublicKeyPath());
+    }
+
+    private void verifyResponse(HttpResponse<String> response) {
+        String timestamp = response.headers().firstValue("Wechatpay-Timestamp").orElse("");
+        String nonce = response.headers().firstValue("Wechatpay-Nonce").orElse("");
+        String signature = response.headers().firstValue("Wechatpay-Signature").orElse("");
+        String serial = response.headers().firstValue("Wechatpay-Serial").orElse("");
+        if (!properties.getWechat().getPlatformPublicKeyId().equals(serial)
+                || blank(timestamp) || blank(nonce) || blank(signature)
+                || !PaymentCrypto.verify(timestamp + "\n" + nonce + "\n" + response.body() + "\n",
+                signature, platformPublicKey())) {
+            throw new IllegalStateException("微信支付响应签名无效");
+        }
     }
 
     private String header(Map<String, String> headers, String name) {

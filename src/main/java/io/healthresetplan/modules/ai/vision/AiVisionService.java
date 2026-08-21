@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.modules.ai.AiUsageLimiter;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
+import io.healthresetplan.modules.membership.MembershipService;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -25,10 +26,13 @@ public class AiVisionService {
 
     private final OneApiService oneApiService;
     private final AiUsageLimiter usageLimiter;
+    private final MembershipService membershipService;
 
-    public AiVisionService(OneApiService oneApiService, AiUsageLimiter usageLimiter) {
+    public AiVisionService(OneApiService oneApiService, AiUsageLimiter usageLimiter,
+                           MembershipService membershipService) {
         this.oneApiService = oneApiService;
         this.usageLimiter = usageLimiter;
+        this.membershipService = membershipService;
     }
 
     public Map<String, Object> analyze(String userId, MultipartFile file, String type) {
@@ -55,6 +59,10 @@ public class AiVisionService {
             Map<String, Object> result = parseResult(completion.content(), normalizedType);
             result.put("type", normalizedType);
             result.put("provider", completion.label());
+            if (membershipService.billingEnabled()
+                    && !membershipService.consume(userId, "meal".equals(normalizedType) ? "meal_analysis" : "ai_vision")) {
+                throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+            }
             return result;
         } catch (RuntimeException e) {
             usageLimiter.release(userId, AiUsageLimiter.Type.IMAGE);

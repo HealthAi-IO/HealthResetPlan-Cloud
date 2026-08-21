@@ -34,6 +34,9 @@ public class PaymentController {
     @GetMapping("/ai-credits/ledger")
     public R<?> ledger() { return R.ok(service.ledger(currentUserId())); }
 
+    @GetMapping("/ai-credits/orders")
+    public R<?> orders() { return R.ok(service.orders(currentUserId())); }
+
     @PostMapping("/ai-credits/orders")
     public R<?> createOrder(@RequestBody Map<String, Object> body) {
         return R.ok(service.createOrder(currentUserId(), text(body.get("productCode")), text(body.get("channel"))));
@@ -56,14 +59,19 @@ public class PaymentController {
             JsonNode root = objectMapper.readTree(body);
             if (root.path("event_type").asText().startsWith("REFUND")) {
                 PaymentGateway.RefundNotification refund = gateway.parseRefundNotification(headers, Collections.emptyMap(), body);
-                if (refund.succeeded()) service.completeRefund(refund.refundNo(), refund.channelRefundNo());
+                if (refund.succeeded()) {
+                    service.completeRefund(refund.refundNo(), refund.channelRefundNo(), refund.amountFen());
+                }
             } else {
                 service.completePayment(gateway.parseNotification(headers, Collections.emptyMap(), body), "wechat");
             }
             return ResponseEntity.ok("{\"code\":\"SUCCESS\",\"message\":\"成功\"}");
         } catch (Exception ex) {
-            log.warn("微信支付回调处理失败 exceptionType={} message={}",
-                    ex.getClass().getSimpleName(), ex.getMessage());
+            Throwable cause = ex.getCause();
+            log.warn("微信支付回调处理失败 exceptionType={} message={} causeType={} causeMessage={}",
+                    ex.getClass().getSimpleName(), ex.getMessage(),
+                    cause == null ? "" : cause.getClass().getSimpleName(),
+                    cause == null ? "" : cause.getMessage());
             return ResponseEntity.badRequest().body("{\"code\":\"FAIL\",\"message\":\"回调处理失败\"}");
         }
     }
@@ -75,6 +83,8 @@ public class PaymentController {
                     Collections.emptyMap(), form, ""), "alipay");
             return "success";
         } catch (Exception ex) {
+            log.warn("支付宝支付回调处理失败 exceptionType={} message={}",
+                    ex.getClass().getSimpleName(), ex.getMessage());
             return "fail";
         }
     }

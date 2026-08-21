@@ -63,12 +63,13 @@ app:
       merchant-id: ${WECHAT_PAY_MERCHANT_ID:}
       merchant-serial-number: ${WECHAT_PAY_MERCHANT_SERIAL_NUMBER:}
       private-key-path: ${WECHAT_PAY_PRIVATE_KEY_PATH:}
-      platform-certificate-path: ${WECHAT_PAY_PLATFORM_CERTIFICATE_PATH:}
+      platform-public-key-path: ${WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH:}
+      platform-public-key-id: ${WECHAT_PAY_PLATFORM_PUBLIC_KEY_ID:}
       api-v3-key: ${WECHAT_PAY_API_V3_KEY:}
       notify-url: ${WECHAT_PAY_NOTIFY_URL:https://api.jkcqplan.com/api/v1/payments/wechat/notify}
     alipay:
       enabled: ${ALIPAY_ENABLED:false}
-      app-id: ${ALIPAY_APP_ID:}
+      app-id: ${ALIPAY_APP_ID:2021006188699392}
       private-key-path: ${ALIPAY_PRIVATE_KEY_PATH:}
       alipay-public-key-path: ${ALIPAY_PUBLIC_KEY_PATH:}
       notify-url: ${ALIPAY_NOTIFY_URL:https://api.jkcqplan.com/api/v1/payments/alipay/notify}

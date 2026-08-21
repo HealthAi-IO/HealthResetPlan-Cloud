@@ -18,7 +18,10 @@ app:
     wechat:
       enabled: ${WECHAT_PAY_ENABLED:false}
     alipay:
-      enabled: ${ALIPAY_ENABLED:false}
+      enabled: ${ALIPAY_ENABLED:true}
+      app-id: ${ALIPAY_APP_ID:2021006188699392}
+      private-key-path: ${ALIPAY_PRIVATE_KEY_PATH:D:/HuaweiMoveData/Users/Tong/Desktop/WeiLingJi/H-ziyuan/密钥企业邮箱支付宝/应用私钥RSA2048-敏感数据，请妥善保管.txt}
+      alipay-public-key-path: ${ALIPAY_PUBLIC_KEY_PATH:D:/HuaweiMoveData/Users/Tong/Desktop/WeiLingJi/H-ziyuan/alipayPublicKey_RSA2企业邮箱支付宝。.txt}
   web-push:
     enabled: ${WEB_PUSH_ENABLED:false}
     public-key: ${WEB_PUSH_PUBLIC_KEY:}

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.modules.ai.AiUsageLimiter;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
+import io.healthresetplan.modules.membership.MembershipService;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -50,10 +51,13 @@ public class AiWellnessService {
 
     private final OneApiService oneApiService;
     private final AiUsageLimiter usageLimiter;
+    private final MembershipService membershipService;
 
-    public AiWellnessService(OneApiService oneApiService, AiUsageLimiter usageLimiter) {
+    public AiWellnessService(OneApiService oneApiService, AiUsageLimiter usageLimiter,
+                             MembershipService membershipService) {
         this.oneApiService = oneApiService;
         this.usageLimiter = usageLimiter;
+        this.membershipService = membershipService;
     }
 
     public AiWellnessResponse generateMenu(String userId, PersonalizedMenuRequest request) {
@@ -62,13 +66,13 @@ public class AiWellnessService {
         }
         String input = toJson(request);
         return complete(userId, request.provider(), AiUsageLimiter.Type.PLAN,
-                MENU_PROMPT, input, 6000, this::validMenu);
+                "personalized_menu", MENU_PROMPT, input, 6000, this::validMenu);
     }
 
     public AiWellnessResponse swapMeal(String userId, MenuSwapRequest request) {
         String input = toJson(request);
         return complete(userId, request.provider(), AiUsageLimiter.Type.PLAN,
-                SWAP_PROMPT, input, 1600, this::validMeal);
+                "meal_swap", SWAP_PROMPT, input, 1600, this::validMeal);
     }
 
     public AiWellnessResponse generateWeeklyReport(
@@ -76,13 +80,14 @@ public class AiWellnessService {
             WeeklyHealthReportRequest request) {
         String input = toJson(request);
         return complete(userId, request.provider(), AiUsageLimiter.Type.REPORT,
-                REPORT_PROMPT, input, 2800, this::validReport);
+                "weekly_report", REPORT_PROMPT, input, 2800, this::validReport);
     }
 
     private AiWellnessResponse complete(
             String userId,
             String provider,
             AiUsageLimiter.Type usageType,
+            String featureCode,
             String systemPrompt,
             String input,
             long maxTokens,
@@ -100,6 +105,9 @@ public class AiWellnessService {
             Map<String, Object> data = parseObject(completion.content());
             if (!validator.test(data)) {
                 throw new BusinessException(50302, "AI返回的数据格式不完整，请重试或切换模型");
+            }
+            if (membershipService.billingEnabled() && !membershipService.consume(userId, featureCode)) {
+                throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
             }
             return new AiWellnessResponse(completion.provider(), data);
         } catch (RuntimeException error) {

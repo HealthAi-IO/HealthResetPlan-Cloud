@@ -45,6 +45,13 @@ public class PaymentService {
                 FROM ai_credit_account WHERE user_id = ?
                 """, userId);
         Map<String, Object> response = new LinkedHashMap<>(account);
+        Map<String, Object> sources = jdbc.queryForMap("""
+                SELECT
+                  COALESCE(SUM(CASE WHEN reason IN ('trial', 'grant') AND change_amount > 0 THEN change_amount ELSE 0 END), 0) AS gifted_total,
+                  COALESCE(SUM(CASE WHEN reason = 'purchase' AND change_amount > 0 THEN change_amount ELSE 0 END), 0) AS purchased_total
+                FROM ai_credit_ledger WHERE user_id = ?
+                """, userId);
+        response.putAll(sources);
         response.put("trialCredits", TRIAL_CREDITS);
         response.put("channels", Map.of(
                 "wechat", gateway("wechat").enabled(),
@@ -114,9 +121,11 @@ public class PaymentService {
 
     public Map<String, Object> orderStatus(String userId, String orderNo) {
         Map<String, Object> order = one("""
-                SELECT order_no, product_name, amount_fen, credit_amount, channel, status,
-                       paid_at, expires_at, refunded_at, created_at
-                FROM payment_order WHERE order_no = ? AND user_id = ?
+                SELECT o.order_no, o.product_name, o.amount_fen, o.credit_amount, o.channel, o.status,
+                       o.paid_at, o.expires_at, o.refunded_at, o.created_at,
+                       r.status AS refund_status, r.failure_reason AS refund_failure_reason
+                FROM payment_order o LEFT JOIN payment_refund r ON r.order_no = o.order_no
+                WHERE o.order_no = ? AND o.user_id = ?
                 """, orderNo, userId);
         if ("created".equals(order.get("status"))
                 && LocalDateTime.now().isAfter((LocalDateTime) order.get("expires_at"))) {
@@ -133,19 +142,58 @@ public class PaymentService {
                 """, userId);
     }
 
+    public List<Map<String, Object>> orders(String userId) {
+        return jdbc.queryForList("""
+                SELECT o.order_no, o.product_name, o.amount_fen, o.credit_amount, o.remaining_credit,
+                       o.channel, o.status, o.paid_at, o.expires_at, o.refunded_at, o.created_at,
+                       r.status AS refund_status, r.failure_reason AS refund_failure_reason
+                FROM payment_order o LEFT JOIN payment_refund r ON r.order_no = o.order_no
+                WHERE o.user_id = ? ORDER BY o.id DESC LIMIT 50
+                """, userId);
+    }
+
     @Transactional
     public Map<String, Object> requestRefund(String userId, String orderNo, String reason) {
         Map<String, Object> order = oneForUpdate("SELECT * FROM payment_order WHERE order_no = ? AND user_id = ? FOR UPDATE",
                 orderNo, userId);
         validateRefundable(order);
         String refundNo = number("R");
+        String normalizedReason = requiredReason(reason);
+        int credits = intValue(order.get("credit_amount"));
+        removeCredits(userId, credits, "refund", orderNo);
+        jdbc.update("""
+                UPDATE payment_order SET status = 'refund_processing', remaining_credit = 0, refund_reason = ?
+                WHERE order_no = ? AND status = 'paid'
+                """, normalizedReason, orderNo);
         jdbc.update("""
                 INSERT INTO payment_refund (
                   refund_no, order_no, user_id, channel, amount_fen, credit_amount, status, reason
-                ) VALUES (?, ?, ?, ?, ?, ?, 'requested', ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 'submitting', ?)
                 """, refundNo, orderNo, userId, order.get("channel"), order.get("amount_fen"),
-                order.get("credit_amount"), requiredReason(reason));
-        return Map.of("refundNo", refundNo, "status", "requested");
+                credits, normalizedReason);
+        PaymentGateway.RefundResult result;
+        try {
+            result = gateway(String.valueOf(order.get("channel"))).refund(
+                    orderNo, refundNo, intValue(order.get("amount_fen")), normalizedReason);
+        } catch (RuntimeException error) {
+            jdbc.update("""
+                    UPDATE payment_refund SET status = 'needs_manual', failure_reason = ?
+                    WHERE refund_no = ? AND status = 'submitting'
+                    """, channelError(error), refundNo);
+            return Map.of("refundNo", refundNo, "status", "needs_manual");
+        }
+        if (!result.accepted()) {
+            throw new BusinessException(50312, "支付渠道未受理退款，请稍后重试");
+        }
+        jdbc.update("""
+                UPDATE payment_refund SET status = 'processing', channel_refund_no = ?, reviewed_at = NOW(3)
+                WHERE refund_no = ? AND status = 'submitting'
+                """, result.channelRefundNo(), refundNo);
+        if ("alipay".equals(order.get("channel"))) {
+            finalizeRefund(refundNo, orderNo, result.channelRefundNo(), normalizedReason);
+            return Map.of("refundNo", refundNo, "status", "completed");
+        }
+        return Map.of("refundNo", refundNo, "status", "processing");
     }
 
     public List<Map<String, Object>> adminOrders() {
@@ -159,55 +207,60 @@ public class PaymentService {
     public List<Map<String, Object>> adminRefunds() {
         return jdbc.queryForList("""
                 SELECT refund_no, order_no, user_id, channel, amount_fen, credit_amount,
-                       status, reason, reviewed_by, reviewed_at, completed_at, created_at
+                       status, reason, failure_reason, reviewed_by, reviewed_at, completed_at, created_at
                 FROM payment_refund ORDER BY id DESC LIMIT 500
                 """);
     }
 
+    @Transactional
     public void approveRefund(String refundNo, long adminId) {
-        Map<String, Object> refund = one("SELECT * FROM payment_refund WHERE refund_no = ?", refundNo);
-        if (!"requested".equals(refund.get("status"))) throw new BusinessException(40911, "退款申请状态已变化");
-        Map<String, Object> order = one("SELECT * FROM payment_order WHERE order_no = ?", refund.get("order_no"));
-        validateRefundable(order);
+        Map<String, Object> refund = oneForUpdate("SELECT * FROM payment_refund WHERE refund_no = ? FOR UPDATE", refundNo);
+        if (!"needs_manual".equals(refund.get("status"))) throw new BusinessException(40911, "该退款不需要人工处理");
+        holdRefundCreditsIfNeeded(refund);
         PaymentGateway.RefundResult result = gateway(String.valueOf(refund.get("channel"))).refund(
                 String.valueOf(refund.get("order_no")), refundNo, intValue(refund.get("amount_fen")),
                 String.valueOf(refund.get("reason")));
         if (!result.accepted()) throw new BusinessException(50312, "支付渠道未受理退款");
         jdbc.update("""
                 UPDATE payment_refund SET status = 'processing', channel_refund_no = ?,
-                  reviewed_by = ?, reviewed_at = NOW(3) WHERE refund_no = ? AND status = 'requested'
+                  failure_reason = NULL, reviewed_by = ?, reviewed_at = NOW(3)
+                WHERE refund_no = ? AND status = 'needs_manual'
                 """, result.channelRefundNo(), adminId, refundNo);
-        if ("alipay".equals(refund.get("channel"))) completeRefund(refundNo, result.channelRefundNo());
+        if ("alipay".equals(refund.get("channel"))) {
+            finalizeRefund(refundNo, String.valueOf(refund.get("order_no")), result.channelRefundNo(),
+                    String.valueOf(refund.get("reason")));
+        }
     }
 
     @Transactional
-    public void completeRefund(String refundNo, String channelRefundNo) {
+    public void completeRefund(String refundNo, String channelRefundNo, int amountFen) {
         Map<String, Object> refund = oneForUpdate("SELECT * FROM payment_refund WHERE refund_no = ? FOR UPDATE", refundNo);
         if ("completed".equals(refund.get("status"))) return;
-        Map<String, Object> order = oneForUpdate("SELECT * FROM payment_order WHERE order_no = ? FOR UPDATE",
-                refund.get("order_no"));
-        validateRefundable(order);
-        int credits = intValue(refund.get("credit_amount"));
-        String userId = String.valueOf(refund.get("user_id"));
-        removeCredits(userId, credits, "refund", String.valueOf(refund.get("order_no")));
-        jdbc.update("""
-                UPDATE payment_order SET status = 'refunded', remaining_credit = 0,
-                  refund_amount_fen = amount_fen, refund_reason = ?, refunded_at = NOW(3)
-                WHERE order_no = ?
-                """, refund.get("reason"), refund.get("order_no"));
-        jdbc.update("""
-                UPDATE payment_refund SET status = 'completed', channel_refund_no = ?, completed_at = NOW(3)
-                WHERE refund_no = ?
-                """, channelRefundNo, refundNo);
+        if (!"processing".equals(refund.get("status")) || amountFen != intValue(refund.get("amount_fen"))) {
+            throw new BusinessException(40911, "退款回调状态或金额不一致");
+        }
+        holdRefundCreditsIfNeeded(refund);
+        finalizeRefund(refundNo, String.valueOf(refund.get("order_no")), channelRefundNo,
+                String.valueOf(refund.get("reason")));
     }
 
     @Transactional
     public void rejectRefund(String refundNo, long adminId, String reason) {
-        int updated = jdbc.update("""
-                UPDATE payment_refund SET status = 'rejected', reason = ?, reviewed_by = ?, reviewed_at = NOW(3)
-                WHERE refund_no = ? AND status = 'requested'
-                """, requiredReason(reason), adminId, refundNo);
-        if (updated != 1) throw new BusinessException(40911, "退款申请状态已变化");
+        Map<String, Object> refund = oneForUpdate("SELECT * FROM payment_refund WHERE refund_no = ? FOR UPDATE", refundNo);
+        if (!"needs_manual".equals(refund.get("status"))) throw new BusinessException(40911, "该退款不需要人工处理");
+        String rejectionReason = requiredReason(reason);
+        String orderNo = String.valueOf(refund.get("order_no"));
+        if (refundCreditsHeld(orderNo)) {
+            restoreRefundCredits(String.valueOf(refund.get("user_id")), intValue(refund.get("credit_amount")), orderNo);
+        }
+        jdbc.update("""
+                UPDATE payment_order SET status = 'refund_rejected', remaining_credit = credit_amount
+                WHERE order_no = ? AND status = 'refund_processing'
+                """, orderNo);
+        jdbc.update("""
+                UPDATE payment_refund SET status = 'rejected', failure_reason = ?, reviewed_by = ?, reviewed_at = NOW(3)
+                WHERE refund_no = ? AND status = 'needs_manual'
+                """, rejectionReason, adminId, refundNo);
     }
 
     @Transactional
@@ -239,6 +292,43 @@ public class PaymentService {
         PaymentGateway gateway = gateways.get(normalize(channel));
         if (gateway == null) throw new BusinessException(40001, "不支持的支付渠道");
         return gateway;
+    }
+
+    private void finalizeRefund(String refundNo, String orderNo, String channelRefundNo, String reason) {
+        jdbc.update("""
+                UPDATE payment_order SET status = 'refunded', remaining_credit = 0,
+                  refund_amount_fen = amount_fen, refund_reason = ?, refunded_at = NOW(3)
+                WHERE order_no = ? AND status = 'refund_processing'
+                """, reason, orderNo);
+        jdbc.update("""
+                UPDATE payment_refund SET status = 'completed', channel_refund_no = ?,
+                  failure_reason = NULL, completed_at = NOW(3)
+                WHERE refund_no = ? AND status IN ('processing', 'needs_manual')
+                """, channelRefundNo, refundNo);
+    }
+
+    private String channelError(RuntimeException error) {
+        return "支付渠道结果不确定，请人工核对后使用原退款单号重试";
+    }
+
+    private void holdRefundCreditsIfNeeded(Map<String, Object> refund) {
+        String orderNo = String.valueOf(refund.get("order_no"));
+        if (refundCreditsHeld(orderNo)) return;
+        Map<String, Object> order = oneForUpdate("SELECT * FROM payment_order WHERE order_no = ? FOR UPDATE", orderNo);
+        validateRefundable(order);
+        removeCredits(String.valueOf(refund.get("user_id")), intValue(refund.get("credit_amount")), "refund", orderNo);
+        jdbc.update("""
+                UPDATE payment_order SET status = 'refund_processing', remaining_credit = 0,
+                  refund_reason = ? WHERE order_no = ? AND status = 'paid'
+                """, refund.get("reason"), orderNo);
+    }
+
+    private boolean refundCreditsHeld(String orderNo) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM ai_credit_ledger
+                WHERE source_order_no = ? AND reason = 'refund'
+                """, Integer.class, orderNo);
+        return count != null && count > 0;
     }
 
     private void validateRefundable(Map<String, Object> order) {
@@ -299,6 +389,18 @@ public class PaymentService {
                 INSERT INTO ai_credit_ledger (user_id, change_amount, balance_after, reason, source_order_no)
                 VALUES (?, ?, ?, ?, ?)
                 """, userId, -amount, balance, reason, orderNo);
+    }
+
+    private void restoreRefundCredits(String userId, int amount, String orderNo) {
+        jdbc.update("""
+                UPDATE ai_credit_account SET balance = balance + ?, version = version + 1
+                WHERE user_id = ?
+                """, amount, userId);
+        int balance = jdbc.queryForObject("SELECT balance FROM ai_credit_account WHERE user_id = ?", Integer.class, userId);
+        jdbc.update("""
+                INSERT INTO ai_credit_ledger (user_id, change_amount, balance_after, reason, source_order_no)
+                VALUES (?, ?, ?, 'refund_release', ?)
+                """, userId, amount, balance, orderNo);
     }
 
     private Map<String, Object> one(String sql, Object... args) {

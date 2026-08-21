@@ -13,10 +13,10 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 
-final class PaymentCrypto {
+public final class PaymentCrypto {
     private PaymentCrypto() {}
 
-    static PrivateKey privateKey(String path) {
+    public static PrivateKey privateKey(String path) {
         try {
             String pem = Files.readString(Path.of(path), StandardCharsets.UTF_8)
                     .replace("-----BEGIN PRIVATE KEY-----", "")
@@ -29,7 +29,7 @@ final class PaymentCrypto {
         }
     }
 
-    static PublicKey publicKey(String path) {
+    public static PublicKey publicKey(String path) {
         try {
             String pem = Files.readString(Path.of(path), StandardCharsets.UTF_8);
             if (pem.contains("BEGIN CERTIFICATE")) {
@@ -48,7 +48,7 @@ final class PaymentCrypto {
         }
     }
 
-    static String sign(String value, PrivateKey key) {
+    public static String sign(String value, PrivateKey key) {
         try {
             Signature signature = Signature.getInstance("SHA256withRSA");
             signature.initSign(key);

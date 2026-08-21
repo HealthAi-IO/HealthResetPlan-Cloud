@@ -25,7 +25,8 @@ public class PaymentProperties {
         private String merchantId = "";
         private String merchantSerialNumber = "";
         private String privateKeyPath = "";
-        private String platformCertificatePath = "";
+        private String platformPublicKeyPath = "";
+        private String platformPublicKeyId = "";
         private String apiV3Key = "";
         private String notifyUrl = "https://api.jkcqplan.com/api/v1/payments/wechat/notify";
         private String apiBase = "https://api.mch.weixin.qq.com";
@@ -40,8 +41,10 @@ public class PaymentProperties {
         public void setMerchantSerialNumber(String value) { merchantSerialNumber = value; }
         public String getPrivateKeyPath() { return privateKeyPath; }
         public void setPrivateKeyPath(String value) { privateKeyPath = value; }
-        public String getPlatformCertificatePath() { return platformCertificatePath; }
-        public void setPlatformCertificatePath(String value) { platformCertificatePath = value; }
+        public String getPlatformPublicKeyPath() { return platformPublicKeyPath; }
+        public void setPlatformPublicKeyPath(String value) { platformPublicKeyPath = value; }
+        public String getPlatformPublicKeyId() { return platformPublicKeyId; }
+        public void setPlatformPublicKeyId(String value) { platformPublicKeyId = value; }
         public String getApiV3Key() { return apiV3Key; }
         public void setApiV3Key(String value) { apiV3Key = value; }
         public String getNotifyUrl() { return notifyUrl; }

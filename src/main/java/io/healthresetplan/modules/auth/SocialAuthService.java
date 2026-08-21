@@ -26,7 +26,6 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Base64;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Service
@@ -68,6 +67,31 @@ public class SocialAuthService {
                     "nickname", profile.nickname(), "avatarUrl", profile.avatarUrl());
         } catch (BusinessException ex) { throw ex; }
         catch (Exception ex) { throw new BusinessException(50212, "微信授权失败，请重试"); }
+    }
+
+    @Transactional
+    public void bindWechat(String userId, String code) {
+        if (!properties.getWechat().isEnabled()) throw new BusinessException(50312, "微信登录尚未开通");
+        try {
+            SocialProfile profile = exchangeWechatCode(code);
+            String providerHash = HashUtils.sha256Hex(profile.providerId());
+            UserCredential credential = credentials.selectOne(new LambdaQueryWrapper<UserCredential>()
+                    .eq(UserCredential::getCredType, "wechat")
+                    .eq(UserCredential::getIdentifierHash, providerHash));
+            if (credential != null) {
+                if (credential.getUserId().equals(userId)) return;
+                throw new BusinessException(40902, "该微信已绑定其他账号");
+            }
+            credential = new UserCredential();
+            credential.setUserId(userId);
+            credential.setCredType("wechat");
+            credential.setIdentifierHash(providerHash);
+            credential.setSecretHash("");
+            credential.setCreatedAt(LocalDateTime.now());
+            credential.setUpdatedAt(LocalDateTime.now());
+            credentials.insert(credential);
+        } catch (BusinessException ex) { throw ex; }
+        catch (Exception ex) { throw new BusinessException(50212, "微信绑定失败，请重试"); }
     }
 
     @Transactional
