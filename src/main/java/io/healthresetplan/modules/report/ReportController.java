@@ -34,6 +34,13 @@ public class ReportController {
         return R.ok(reportService.analyze(file, userId));
     }
 
+    @PostMapping("/analyze-stored")
+    public R<AnalyzeResponse> analyzeStored(@RequestBody StoredAnalyzeRequest req) {
+        String userId = currentUserId();
+        consentService.requireActive(userId);
+        return R.ok(reportService.analyzeStored(req.objectKey(), req.mimeType(), userId));
+    }
+
     /**
      * 保存用户确认后的报告（客户端已在本地加密）。
      * 幂等：相同 clientId 重复提交只更新，不重复插入。
@@ -65,4 +72,6 @@ public class ReportController {
     private String currentUserId() {
         return (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
     }
+
+    public record StoredAnalyzeRequest(String objectKey, String mimeType) {}
 }

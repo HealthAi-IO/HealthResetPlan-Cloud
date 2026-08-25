@@ -66,7 +66,6 @@ public class SecurityConfig {
                                 "/api/v1/admin/system/roles"
                         ).hasRole("ADMIN")
                         .requestMatchers("/api/v1/admin/vip/**", "/api/v1/admin/orders/**").denyAll()
-                        .requestMatchers("/api/v1/admin/feedback/**").denyAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/users/**")
                         .hasAnyAuthority("PERM_user:read", "PERM_*")
                         .requestMatchers("/api/v1/admin/analytics/**")
@@ -98,6 +97,18 @@ public class SecurityConfig {
                         .hasAnyAuthority("PERM_ai:write", "PERM_*")
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/reminders/**")
                         .hasAnyAuthority("PERM_reminder:read", "PERM_*")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/payments/**")
+                        .hasAnyAuthority("PERM_order:read", "PERM_*")
+                        .requestMatchers("/api/v1/admin/payments/**")
+                        .hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/admin/operations/ai-summary")
+                        .hasAnyAuthority("PERM_analytics:read", "PERM_ai:read", "PERM_*")
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/admin/operations/comments/**",
+                                "/api/v1/admin/operations/messages/**")
+                        .hasAnyAuthority("PERM_content:read", "PERM_*")
+                        .requestMatchers("/api/v1/admin/operations/**")
+                        .hasAnyAuthority("PERM_content:write", "PERM_*")
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/feedback/**")
                         .hasAnyAuthority("PERM_feedback:read", "PERM_feedback:write", "PERM_*")
                         .requestMatchers("/api/v1/admin/feedback/**")

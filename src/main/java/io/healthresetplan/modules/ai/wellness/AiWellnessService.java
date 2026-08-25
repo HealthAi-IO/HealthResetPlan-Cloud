@@ -66,7 +66,7 @@ public class AiWellnessService {
         }
         String input = toJson(request);
         return complete(userId, request.provider(), AiUsageLimiter.Type.PLAN,
-                "personalized_menu", MENU_PROMPT, input, 6000, this::validMenu);
+                "personalized_menu", MENU_PROMPT, input, 3500, this::validMenu);
     }
 
     public AiWellnessResponse swapMeal(String userId, MenuSwapRequest request) {
@@ -107,7 +107,7 @@ public class AiWellnessService {
                 throw new BusinessException(50302, "AI返回的数据格式不完整，请重试或切换模型");
             }
             if (membershipService.billingEnabled() && !membershipService.consume(userId, featureCode)) {
-                throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+                throw new BusinessException(42903, "AI 健康权益已用完，请充值后继续使用");
             }
             return new AiWellnessResponse(completion.provider(), data);
         } catch (RuntimeException error) {

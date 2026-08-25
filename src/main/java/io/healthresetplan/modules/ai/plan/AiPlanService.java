@@ -121,7 +121,7 @@ public class AiPlanService {
 
     private AiPlanResponse chargeCredit(String userId, AiPlanResponse response) {
         if (membershipService.billingEnabled() && !membershipService.consume(userId, "ai_plan")) {
-            throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+            throw new BusinessException(42903, "AI 健康权益已用完，请充值后继续使用");
         }
         return response;
     }

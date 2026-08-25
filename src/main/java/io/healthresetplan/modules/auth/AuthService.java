@@ -360,7 +360,7 @@ public class AuthService {
             return;
         }
         userDataService.delete(userId);
-        deleteAvatar(account, userId);
+        fileStorageService.deleteAllForUser(userId);
         deleteUserRows(userId);
     }
 
@@ -565,16 +565,6 @@ public class AuthService {
         }
         jdbc.update("DELETE FROM audit_log WHERE actor_type = 'user' AND actor_id = ?", userId);
         jdbc.update("DELETE FROM user_account WHERE user_id = ?", userId);
-    }
-
-    private void deleteAvatar(UserAccount account, String userId) {
-        String value = account.getAvatarUrl();
-        if (value == null) return;
-        int marker = value.indexOf("objectKey=");
-        if (marker < 0) return;
-        String objectKey = java.net.URLDecoder.decode(
-                value.substring(marker + "objectKey=".length()), java.nio.charset.StandardCharsets.UTF_8);
-        fileStorageService.delete(objectKey, userId);
     }
 
     private static String nullToEmpty(String value) {

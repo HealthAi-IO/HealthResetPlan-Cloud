@@ -16,7 +16,7 @@ public class ClientEventRequest {
     private String channel;
 
     @NotBlank
-    @Pattern(regexp = "^(app_open|home_view|plan_view|clock_view|indicator_view|sync_view|ai_chat|plan_generated|clock_recorded|indicator_recorded|sync_success|sync_failure)$", message = "eventType 不合法")
+    @Pattern(regexp = "^(app_open|home_view|plan_view|meal_view|record_view|clock_view|indicator_view|sync_view|ai_chat|ai_chat_stream_started|ai_chat_stream_completed|ai_chat_stream_stopped|ai_chat_stream_failed|plan_generated|clock_recorded|indicator_recorded|report_recognition_view|image_analysis_view|weekly_report_view|quit_smoking_view|content_view|message_center_view|ai_credits_view|profile_view|sync_success|sync_failure)$", message = "eventType 不合法")
     private String eventType;
 
     @Size(max = 128)

@@ -84,6 +84,20 @@ public class AdminController {
                 ORDER BY days.day
                 """));
         data.put("indicatorTypes", indicatorTypes(null));
+        data.put("featureActivity", jdbc.queryForList("""
+                SELECT event_type AS eventType, COUNT(DISTINCT user_id) AS userCount,
+                       COUNT(*) AS eventCount
+                FROM client_event
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                  AND event_type IN (
+                    'meal_view', 'report_recognition_view', 'image_analysis_view',
+                    'weekly_report_view', 'quit_smoking_view', 'content_view', 'ai_chat',
+                    'ai_chat_stream_started', 'ai_chat_stream_completed',
+                    'ai_chat_stream_stopped', 'ai_chat_stream_failed'
+                  )
+                GROUP BY event_type
+                ORDER BY eventCount DESC
+                """));
         data.put("recentUsers", recentUsers(8));
         return R.ok(data);
     }

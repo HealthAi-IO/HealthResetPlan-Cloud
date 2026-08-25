@@ -3,15 +3,18 @@ package io.healthresetplan.modules.ai.chat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.result.R;
 import io.healthresetplan.modules.ai.AiUsageLimiter;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @RestController
 @RequestMapping("/api/v1/ai/chat")
@@ -35,7 +38,7 @@ public class AiChatController {
 
     /** 非流式对话（兼容旧客户端） */
     @PostMapping
-    public R<AiChatResponse> chat(@RequestBody AiChatRequest req) {
+    public R<AiChatResponse> chat(@Valid @RequestBody AiChatRequest req) {
         String userId = currentUserId();
         consentService.requireActive(userId);
         return R.ok(chatService.chat(userId, req));
@@ -57,17 +60,26 @@ public class AiChatController {
      * </pre>
      */
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter chatStream(@RequestBody AiChatRequest req) {
+    public ResponseEntity<SseEmitter> chatStream(@Valid @RequestBody AiChatRequest req) {
         String userId = currentUserId();
         consentService.requireActive(userId);
         // 90 秒超时，与 OneAPI 请求超时对齐
         SseEmitter emitter = new SseEmitter(180_000L);
+        AtomicBoolean disconnected = new AtomicBoolean(false);
+        emitter.onCompletion(() -> disconnected.set(true));
+        emitter.onTimeout(() -> disconnected.set(true));
+        emitter.onError(error -> disconnected.set(true));
 
         // 将阻塞的 LLM 调用放入异步线程，避免占用 Tomcat 线程
         taskExecutor.execute(() -> {
             try {
                 chatService.streamChat(userId, req,
+                        metadata -> send(emitter, "meta", Map.of(
+                                "requestId", metadata.requestId() == null ? "" : metadata.requestId(),
+                                "contextSources", metadata.contextSources(),
+                                "personalized", metadata.personalized())),
                         token -> {
+                            if (disconnected.get()) throw new IllegalStateException("SSE client disconnected");
                             try {
                                 String json = MAPPER.writeValueAsString(Map.of("token", token));
                                 emitter.send(SseEmitter.event().data(json));
@@ -77,7 +89,8 @@ public class AiChatController {
                         },
                         () -> {
                             try {
-                                emitter.send(SseEmitter.event().name("done").data("[DONE]"));
+                                emitter.send(SseEmitter.event().name("done").data(Map.of(
+                                        "requestId", req.requestId() == null ? "" : req.requestId())));
                                 emitter.complete();
                             } catch (Exception e) {
                                 emitter.completeWithError(e);
@@ -105,7 +118,11 @@ public class AiChatController {
             }
         });
 
-        return emitter;
+        return ResponseEntity.ok()
+                .header("Cache-Control", "no-cache, no-transform")
+                .header("X-Accel-Buffering", "no")
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .body(emitter);
     }
 
     /** 查询当前用户今日 AI 使用次数 */
@@ -123,5 +140,13 @@ public class AiChatController {
 
     private String currentUserId() {
         return (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+    }
+
+    private void send(SseEmitter emitter, String event, Object data) {
+        try {
+            emitter.send(SseEmitter.event().name(event).data(data));
+        } catch (Exception e) {
+            throw new IllegalStateException("SSE client disconnected", e);
+        }
     }
 }

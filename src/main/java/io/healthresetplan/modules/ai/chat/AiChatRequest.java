@@ -1,5 +1,10 @@
 package io.healthresetplan.modules.ai.chat;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+
 import java.util.List;
 
 /**
@@ -12,9 +17,14 @@ import java.util.List;
  * @param profileSummary 用户健康档案摘要（可选，用于构建 system prompt）
  */
 public record AiChatRequest(
-        String provider,
-        List<ChatMessage> messages,
-        String profileSummary
+        @Size(max = 32) String provider,
+        @Size(max = 100) List<@Valid ChatMessage> messages,
+        @Size(max = 1000) String profileSummary,
+        @Pattern(regexp = "^[0-9a-fA-F-]{36}$", message = "sessionId 格式不合法") String sessionId,
+        @Pattern(regexp = "^[0-9a-fA-F-]{36}$", message = "requestId 格式不合法") String requestId,
+        Boolean personalized
 ) {
-    public record ChatMessage(String role, String content) {}
+    public record ChatMessage(
+            @Pattern(regexp = "^(user|assistant)$", message = "消息角色不合法") String role,
+            @NotBlank @Size(max = 4000) String content) {}
 }

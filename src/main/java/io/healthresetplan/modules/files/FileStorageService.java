@@ -21,6 +21,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.List;
 
 @Service
 public class FileStorageService {
@@ -176,6 +178,45 @@ public class FileStorageService {
             client().deleteObject(builder -> builder.bucket(properties.getBucket()).key(objectKey));
         } catch (S3Exception ex) {
             log.warn("OSS 文件删除失败 objectKey={}", objectKey, ex);
+        }
+    }
+
+    public void deleteAllForUser(String userId) {
+        String safeUserId = safe(userId);
+        List<String> prefixes = List.of(
+                "files/" + safeUserId + "/",
+                "avatars/" + safeUserId + "/");
+        if (useLocalStorage()) {
+            for (String prefix : prefixes) {
+                Path directory = localPath(prefix);
+                if (!Files.exists(directory)) continue;
+                try (var paths = Files.walk(directory)) {
+                    paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (Exception ex) {
+                            throw storageFailure("账号图片删除失败", ex);
+                        }
+                    });
+                } catch (Exception ex) {
+                    if (ex instanceof BusinessException businessException) throw businessException;
+                    throw storageFailure("账号图片删除失败", ex);
+                }
+            }
+            return;
+        }
+        try {
+            for (String prefix : prefixes) {
+                client().listObjectsV2Paginator(builder -> builder
+                                .bucket(properties.getBucket())
+                                .prefix(prefix))
+                        .contents()
+                        .forEach(item -> client().deleteObject(builder -> builder
+                                .bucket(properties.getBucket())
+                                .key(item.key())));
+            }
+        } catch (S3Exception ex) {
+            throw storageFailure("账号图片删除失败", ex);
         }
     }
 

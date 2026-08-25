@@ -28,7 +28,7 @@ public class MembershipService {
 
     public void requireCredit(String userId, String feature) {
         if (!hasFeature(userId, feature)) {
-            throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+            throw new BusinessException(42903, "AI 健康权益已用完，请充值后继续使用");
         }
     }
 }

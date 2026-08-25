@@ -12,6 +12,7 @@ import io.healthresetplan.modules.report.dto.AnalyzeResponse;
 import io.healthresetplan.modules.report.dto.ReportSaveRequest;
 import io.healthresetplan.modules.report.entity.HealthReport;
 import io.healthresetplan.modules.report.mapper.HealthReportMapper;
+import io.healthresetplan.modules.files.FileStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -98,17 +99,19 @@ public class ReportService {
     private final OneApiService oneApiService;
     private final AiUsageLimiter usageLimiter;
     private final MembershipService membershipService;
+    private final FileStorageService fileStorageService;
 
     public ReportService(HealthReportMapper reportMapper, OneApiService oneApiService,
-                         AiUsageLimiter usageLimiter, MembershipService membershipService) {
+                         AiUsageLimiter usageLimiter, MembershipService membershipService,
+                         FileStorageService fileStorageService) {
         this.reportMapper = reportMapper;
         this.oneApiService = oneApiService;
         this.usageLimiter = usageLimiter;
         this.membershipService = membershipService;
+        this.fileStorageService = fileStorageService;
     }
 
     public AnalyzeResponse analyze(MultipartFile file, String userId) {
-        long startedAt = System.currentTimeMillis();
         if (file == null || file.isEmpty()) {
             throw new BusinessException(40001, "图片不能为空");
         }
@@ -120,15 +123,33 @@ public class ReportService {
         if (file.getSize() > MAX_SIZE_BYTES) {
             throw new BusinessException(40001, "图片大小不能超过 10MB");
         }
-        membershipService.requireCredit(userId, "report_ocr");
-        log.info("Report OCR accepted mimeType={} sizeBytes={}", mimeType, file.getSize());
-
         byte[] bytes;
         try {
             bytes = file.getBytes();
         } catch (Exception e) {
             throw new BusinessException(50001, "图片读取失败");
         }
+        return analyzeBytes(bytes, mimeType, userId);
+    }
+
+    public AnalyzeResponse analyzeStored(String objectKey, String mimeType, String userId) {
+        if (mimeType == null || !ALLOWED_TYPES.contains(mimeType.toLowerCase())) {
+            throw new BusinessException(40001, "仅支持 JPEG / PNG / WebP / GIF 格式图片");
+        }
+        byte[] bytes = fileStorageService.read(objectKey, userId);
+        if (bytes == null || bytes.length == 0) {
+            throw new BusinessException(40001, "图片不存在或已删除");
+        }
+        if (bytes.length > MAX_SIZE_BYTES) {
+            throw new BusinessException(40001, "图片大小不能超过 10MB");
+        }
+        return analyzeBytes(bytes, mimeType, userId);
+    }
+
+    private AnalyzeResponse analyzeBytes(byte[] bytes, String mimeType, String userId) {
+        long startedAt = System.currentTimeMillis();
+        membershipService.requireCredit(userId, "report_ocr");
+        log.info("Report OCR accepted mimeType={} sizeBytes={}", mimeType, bytes.length);
 
         String base64 = Base64.getEncoder().encodeToString(bytes);
         usageLimiter.consume(userId, AiUsageLimiter.Type.REPORT);
@@ -175,7 +196,7 @@ public class ReportService {
 
     private AnalyzeResponse consumeCredit(String userId, AnalyzeResponse response) {
         if (!membershipService.consume(userId, "report_ocr")) {
-            throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+            throw new BusinessException(42903, "AI 健康权益已用完，请充值后继续使用");
         }
         return response;
     }

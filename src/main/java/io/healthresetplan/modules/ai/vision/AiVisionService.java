@@ -6,6 +6,7 @@ import io.healthresetplan.common.exception.BusinessException;
 import io.healthresetplan.modules.ai.AiUsageLimiter;
 import io.healthresetplan.modules.ai.oneapi.OneApiService;
 import io.healthresetplan.modules.membership.MembershipService;
+import io.healthresetplan.modules.files.FileStorageService;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,12 +28,15 @@ public class AiVisionService {
     private final OneApiService oneApiService;
     private final AiUsageLimiter usageLimiter;
     private final MembershipService membershipService;
+    private final FileStorageService fileStorageService;
 
     public AiVisionService(OneApiService oneApiService, AiUsageLimiter usageLimiter,
-                           MembershipService membershipService) {
+                           MembershipService membershipService,
+                           FileStorageService fileStorageService) {
         this.oneApiService = oneApiService;
         this.usageLimiter = usageLimiter;
         this.membershipService = membershipService;
+        this.fileStorageService = fileStorageService;
     }
 
     public Map<String, Object> analyze(String userId, MultipartFile file, String type) {
@@ -46,7 +50,25 @@ public class AiVisionService {
             throw new BusinessException(50001, "图片读取失败");
         }
 
-        String mimeType = file.getContentType();
+        return analyzeBytes(userId, bytes, file.getContentType(), normalizedType);
+    }
+
+    public Map<String, Object> analyzeStored(
+            String userId, String objectKey, String mimeType, String type) {
+        String normalizedType = normalizeType(type);
+        validateMimeType(mimeType);
+        byte[] bytes = fileStorageService.read(objectKey, userId);
+        if (bytes == null || bytes.length == 0) {
+            throw new BusinessException(40001, "图片不存在或已删除");
+        }
+        if (bytes.length > MAX_SIZE_BYTES) {
+            throw new BusinessException(40001, "图片大小不能超过 10MB");
+        }
+        return analyzeBytes(userId, bytes, mimeType, normalizedType);
+    }
+
+    private Map<String, Object> analyzeBytes(
+            String userId, byte[] bytes, String mimeType, String normalizedType) {
         usageLimiter.consume(userId, AiUsageLimiter.Type.IMAGE);
         try {
             OneApiService.VisionCompletion completion = oneApiService.analyzeImage(
@@ -61,7 +83,7 @@ public class AiVisionService {
             result.put("provider", completion.label());
             if (membershipService.billingEnabled()
                     && !membershipService.consume(userId, "meal".equals(normalizedType) ? "meal_analysis" : "ai_vision")) {
-                throw new BusinessException(42901, "AI 次数不足，请购买 AI 健康分析包");
+                throw new BusinessException(42903, "AI 健康权益已用完，请充值后继续使用");
             }
             return result;
         } catch (RuntimeException e) {
@@ -74,12 +96,15 @@ public class AiVisionService {
         if (file == null || file.isEmpty()) {
             throw new BusinessException(40001, "图片不能为空");
         }
-        String mimeType = file.getContentType();
-        if (mimeType == null || !ALLOWED_TYPES.contains(mimeType.toLowerCase())) {
-            throw new BusinessException(40001, "仅支持 JPEG / PNG / WebP / GIF 图片");
-        }
+        validateMimeType(file.getContentType());
         if (file.getSize() > MAX_SIZE_BYTES) {
             throw new BusinessException(40001, "图片大小不能超过 10MB");
+        }
+    }
+
+    private void validateMimeType(String mimeType) {
+        if (mimeType == null || !ALLOWED_TYPES.contains(mimeType.toLowerCase())) {
+            throw new BusinessException(40001, "仅支持 JPEG / PNG / WebP / GIF 图片");
         }
     }
 

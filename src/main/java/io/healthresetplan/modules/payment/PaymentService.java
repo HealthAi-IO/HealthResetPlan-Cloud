@@ -204,12 +204,60 @@ public class PaymentService {
                 """);
     }
 
+    public Map<String, Object> adminSummary() {
+        return jdbc.queryForMap("""
+                SELECT
+                  COUNT(*) AS total_orders,
+                  COALESCE(SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END), 0) AS paid_orders,
+                  COALESCE(SUM(CASE WHEN status = 'paid' THEN amount_fen ELSE 0 END), 0) AS paid_amount_fen,
+                  COALESCE(SUM(CASE WHEN created_at >= CURDATE() THEN 1 ELSE 0 END), 0) AS today_orders,
+                  (SELECT COUNT(*) FROM payment_refund WHERE status = 'needs_manual') AS manual_refunds
+                FROM payment_order
+                """);
+    }
+
     public List<Map<String, Object>> adminRefunds() {
         return jdbc.queryForList("""
                 SELECT refund_no, order_no, user_id, channel, amount_fen, credit_amount,
                        status, reason, failure_reason, reviewed_by, reviewed_at, completed_at, created_at
                 FROM payment_refund ORDER BY id DESC LIMIT 500
                 """);
+    }
+
+    @Transactional
+    public Map<String, Object> grantCredits(String userId, int amount, String reason,
+                                            long adminId, String ip, String userAgent) {
+        String targetUserId = userId == null ? "" : userId.trim();
+        String grantReason = requiredGrantReason(reason);
+        if (targetUserId.isBlank() || amount < 1 || amount > 10000) {
+            throw new BusinessException(40001, "赠送次数应为 1-10000");
+        }
+        Map<String, Object> user = one("""
+                SELECT user_id, nickname, phone_tail, status
+                FROM user_account
+                WHERE user_id = ? AND deleted_at IS NULL
+                FOR UPDATE
+                """, targetUserId);
+        if (intValue(user.get("status")) != 1) {
+            throw new BusinessException(40917, "用户状态异常，不能赠送权益");
+        }
+        ensureTrial(targetUserId);
+        addCredits(targetUserId, amount, "grant", null, "manual_admin");
+        int balance = jdbc.queryForObject(
+                "SELECT balance FROM ai_credit_account WHERE user_id = ?", Integer.class, targetUserId);
+        String safeUserAgent = userAgent == null ? "" : userAgent.trim();
+        jdbc.update("""
+                INSERT INTO audit_log (actor_type, actor_id, action, target, ip, user_agent, detail)
+                VALUES ('admin', ?, 'ai_credit_granted', ?, ?, ?, ?)
+                """, String.valueOf(adminId), "user:" + targetUserId,
+                ip == null ? "" : ip.trim(), safeUserAgent.substring(0, Math.min(safeUserAgent.length(), 255)),
+                "amount=" + amount + ", balanceAfter=" + balance + ", reason=" + grantReason);
+        return Map.of(
+                "userId", targetUserId,
+                "nickname", String.valueOf(user.getOrDefault("nickname", "")),
+                "amount", amount,
+                "balance", balance,
+                "reason", grantReason);
     }
 
     @Transactional
@@ -416,6 +464,13 @@ public class PaymentService {
     private String requiredReason(String value) {
         String reason = value == null ? "" : value.trim();
         if (reason.length() < 2 || reason.length() > 200) throw new BusinessException(40001, "退款原因需为 2-200 个字符");
+        return reason;
+    }
+    private String requiredGrantReason(String value) {
+        String reason = value == null ? "" : value.trim();
+        if (reason.length() < 2 || reason.length() > 200) {
+            throw new BusinessException(40001, "赠送原因需为 2-200 个字符");
+        }
         return reason;
     }
     private String number(String prefix) {
