@@ -92,6 +92,7 @@ public class AiWellnessService {
             String input,
             long maxTokens,
             java.util.function.Predicate<Map<String, Object>> validator) {
+        membershipService.requireCredit(userId, featureCode);
         usageLimiter.consume(userId, usageType);
         try {
             OneApiService.AiCompletion completion = oneApiService.completeJsonWithProvider(

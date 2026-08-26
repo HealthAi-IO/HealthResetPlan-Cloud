@@ -198,6 +198,13 @@ public class AdminController {
                   JOIN page_users pu ON pu.user_id = hr.user_id
                   WHERE hr.deleted_at IS NULL
                   GROUP BY hr.user_id
+                ),
+                vip_stats AS (
+                  SELECT user_id, COUNT(*) AS active_subscription_count,
+                         MAX(expires_at) AS member_expires_at
+                  FROM user_vip_subscription
+                  WHERE status = 'active' AND starts_at <= NOW(3) AND expires_at > NOW(3)
+                  GROUP BY user_id
                 )
                 SELECT
                   pu.user_id,
@@ -213,12 +220,13 @@ public class AdminController {
                   ls.last_login_at,
                   COALESCE(ins.indicator_count, 0) AS indicator_count,
                   COALESCE(rs.report_count, 0) AS report_count,
-                   0 AS active_subscription_count,
-                   NULL AS member_expires_at
+                   COALESCE(vs.active_subscription_count, 0) AS active_subscription_count,
+                   vs.member_expires_at
                 FROM page_users pu
                 LEFT JOIN login_stats ls ON ls.user_id = pu.user_id
                 LEFT JOIN indicator_stats ins ON ins.user_id = pu.user_id
                 LEFT JOIN report_stats rs ON rs.user_id = pu.user_id
+                LEFT JOIN vip_stats vs ON vs.user_id = pu.user_id
                  ORDER BY pu.created_at DESC
                 """;
 
@@ -250,8 +258,10 @@ public class AdminController {
                   (SELECT MAX(us.created_at) FROM user_session us WHERE us.user_id = ua.user_id) AS last_login_at,
                   (SELECT COUNT(*) FROM health_indicator hi WHERE hi.user_id = ua.user_id AND hi.deleted_at IS NULL) AS indicator_count,
                   (SELECT COUNT(*) FROM health_report hr WHERE hr.user_id = ua.user_id AND hr.deleted_at IS NULL) AS report_count,
-                   0 AS active_subscription_count,
-                   NULL AS member_expires_at
+                   (SELECT COUNT(*) FROM user_vip_subscription vs
+                    WHERE vs.user_id = ua.user_id AND vs.status = 'active' AND vs.starts_at <= NOW(3) AND vs.expires_at > NOW(3)) AS active_subscription_count,
+                   (SELECT MAX(vs.expires_at) FROM user_vip_subscription vs
+                    WHERE vs.user_id = ua.user_id AND vs.status = 'active' AND vs.starts_at <= NOW(3) AND vs.expires_at > NOW(3)) AS member_expires_at
                 FROM user_account ua
                 WHERE ua.deleted_at IS NULL AND ua.user_id = ?
                 """, userId);
@@ -262,7 +272,10 @@ public class AdminController {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("profile", userRow(rows.get(0)));
         detail.put("indicatorTypes", indicatorTypes(userId));
-        detail.put("subscriptions", List.of());
+        detail.put("subscriptions", jdbc.queryForList("""
+                SELECT plan_code, status, starts_at, expires_at, credit_amount, remaining_credit, payment_order_no
+                FROM user_vip_subscription WHERE user_id = ? ORDER BY expires_at DESC LIMIT 50
+                """, userId));
         detail.put("sessions", jdbc.queryForList("""
                 SELECT device_id, ip, user_agent, expires_at, created_at
                 FROM user_session

@@ -17,7 +17,6 @@ import java.util.stream.Collectors;
 @Service
 public class PaymentService {
 
-    private static final int TRIAL_CREDITS = 3;
     private final JdbcTemplate jdbc;
     private final PaymentProperties properties;
     private final Map<String, PaymentGateway> gateways;
@@ -30,7 +29,8 @@ public class PaymentService {
 
     public List<Map<String, Object>> products() {
         return jdbc.queryForList("""
-                SELECT code, name, price_fen, credit_amount
+                SELECT code, name, price_fen, credit_amount,
+                       CASE WHEN code LIKE 'vip_%' THEN 'vip' ELSE 'credit' END AS kind
                 FROM ai_credit_product
                 WHERE status = 1
                 ORDER BY sort_order, id
@@ -39,7 +39,7 @@ public class PaymentService {
 
     @Transactional
     public Map<String, Object> balance(String userId) {
-        ensureTrial(userId);
+        ensureAccount(userId);
         Map<String, Object> account = jdbc.queryForMap("""
                 SELECT balance, granted_total, consumed_total, updated_at
                 FROM ai_credit_account WHERE user_id = ?
@@ -52,7 +52,9 @@ public class PaymentService {
                 FROM ai_credit_ledger WHERE user_id = ?
                 """, userId);
         response.putAll(sources);
-        response.put("trialCredits", TRIAL_CREDITS);
+        response.put("purchased_balance", response.get("balance"));
+        response.put("vip_balance", 0);
+        response.put("trialDays", 14);
         response.put("channels", Map.of(
                 "wechat", gateway("wechat").enabled(),
                 "alipay", gateway("alipay").enabled()));
@@ -60,7 +62,7 @@ public class PaymentService {
     }
 
     public boolean hasAvailable(String userId) {
-        return intValue(balance(userId).get("balance")) > 0;
+        return accountBalance(userId) > 0;
     }
 
     @Transactional
@@ -72,6 +74,15 @@ public class PaymentService {
                 SELECT code, name, price_fen, credit_amount
                 FROM ai_credit_product WHERE code = ? AND status = 1
                 """, productCode);
+        if ("ai_10_trial".equals(productCode)) {
+            Integer existing = jdbc.queryForObject("""
+                    SELECT COUNT(*) FROM payment_order
+                    WHERE user_id = ? AND product_code = ? AND status IN ('created', 'paid')
+                    """, Integer.class, userId, productCode);
+            if (existing != null && existing > 0) {
+                throw new BusinessException(40918, "新人体验包每位用户限购一次");
+            }
+        }
         String orderNo = number("P");
         LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(properties.getOrderExpireMinutes());
         jdbc.update("""
@@ -116,15 +127,38 @@ public class PaymentService {
                 SET status = 'paid', channel_order_no = ?, paid_at = NOW(3), remaining_credit = ?
                 WHERE order_no = ? AND status = 'created'
                 """, notification.channelOrderNo(), credits, notification.orderNo());
-        addCredits(userId, credits, "purchase", notification.orderNo(), null);
+        String productCode = String.valueOf(order.get("product_code"));
+        if (isVipProduct(productCode)) {
+            activateVip(userId, productCode, credits, notification.orderNo());
+        } else {
+            addCredits(userId, credits, "purchase", notification.orderNo(), null);
+        }
+    }
+
+    public Map<String, Object> vipStatus(String userId) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT plan_code, status, starts_at, expires_at, benefit_used
+                FROM user_vip_subscription
+                WHERE user_id = ? AND status = 'active' AND starts_at <= NOW(3) AND expires_at > NOW(3)
+                ORDER BY expires_at DESC LIMIT 1
+                """, userId);
+        if (rows.isEmpty()) {
+            return Map.of("active", false);
+        }
+        Map<String, Object> result = new LinkedHashMap<>(rows.get(0));
+        result.put("active", true);
+        return result;
     }
 
     public Map<String, Object> orderStatus(String userId, String orderNo) {
         Map<String, Object> order = one("""
                 SELECT o.order_no, o.product_name, o.amount_fen, o.credit_amount, o.channel, o.status,
                        o.paid_at, o.expires_at, o.refunded_at, o.created_at,
-                       r.status AS refund_status, r.failure_reason AS refund_failure_reason
-                FROM payment_order o LEFT JOIN payment_refund r ON r.order_no = o.order_no
+                       r.status AS refund_status, r.failure_reason AS refund_failure_reason,
+                       COALESCE(v.benefit_used, 0) AS benefit_used
+                FROM payment_order o
+                LEFT JOIN payment_refund r ON r.order_no = o.order_no
+                LEFT JOIN user_vip_subscription v ON v.payment_order_no = o.order_no
                 WHERE o.order_no = ? AND o.user_id = ?
                 """, orderNo, userId);
         if ("created".equals(order.get("status"))
@@ -146,8 +180,11 @@ public class PaymentService {
         return jdbc.queryForList("""
                 SELECT o.order_no, o.product_name, o.amount_fen, o.credit_amount, o.remaining_credit,
                        o.channel, o.status, o.paid_at, o.expires_at, o.refunded_at, o.created_at,
-                       r.status AS refund_status, r.failure_reason AS refund_failure_reason
-                FROM payment_order o LEFT JOIN payment_refund r ON r.order_no = o.order_no
+                       r.status AS refund_status, r.failure_reason AS refund_failure_reason,
+                       COALESCE(v.benefit_used, 0) AS benefit_used
+                FROM payment_order o
+                LEFT JOIN payment_refund r ON r.order_no = o.order_no
+                LEFT JOIN user_vip_subscription v ON v.payment_order_no = o.order_no
                 WHERE o.user_id = ? ORDER BY o.id DESC LIMIT 50
                 """, userId);
     }
@@ -160,7 +197,7 @@ public class PaymentService {
         String refundNo = number("R");
         String normalizedReason = requiredReason(reason);
         int credits = intValue(order.get("credit_amount"));
-        removeCredits(userId, credits, "refund", orderNo);
+        holdRefundBenefits(order);
         jdbc.update("""
                 UPDATE payment_order SET status = 'refund_processing', remaining_credit = 0, refund_reason = ?
                 WHERE order_no = ? AND status = 'paid'
@@ -241,7 +278,7 @@ public class PaymentService {
         if (intValue(user.get("status")) != 1) {
             throw new BusinessException(40917, "用户状态异常，不能赠送权益");
         }
-        ensureTrial(targetUserId);
+        ensureAccount(targetUserId);
         addCredits(targetUserId, amount, "grant", null, "manual_admin");
         int balance = jdbc.queryForObject(
                 "SELECT balance FROM ai_credit_account WHERE user_id = ?", Integer.class, targetUserId);
@@ -261,10 +298,53 @@ public class PaymentService {
     }
 
     @Transactional
+    public Map<String, Object> extendVip(String userId, int days, String reason,
+                                          long adminId, String ip, String userAgent) {
+        String targetUserId = userId == null ? "" : userId.trim();
+        String normalizedReason = requiredGrantReason(reason);
+        if (targetUserId.isBlank() || days < 1 || days > 3650) {
+            throw new BusinessException(40001, "会员延长天数应为 1-3650");
+        }
+        Map<String, Object> user = one("""
+                SELECT user_id, nickname, phone_tail, status
+                FROM user_account WHERE user_id = ? AND deleted_at IS NULL FOR UPDATE
+                """, targetUserId);
+        if (intValue(user.get("status")) != 1) {
+            throw new BusinessException(40917, "用户状态异常，不能延长会员");
+        }
+        List<Map<String, Object>> subscriptions = jdbc.queryForList("""
+                SELECT id, expires_at FROM user_vip_subscription
+                WHERE user_id = ? AND status = 'active' AND expires_at > NOW(3)
+                ORDER BY expires_at DESC LIMIT 1 FOR UPDATE
+                """, targetUserId);
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime before = subscriptions.isEmpty() ? now : (LocalDateTime) subscriptions.get(0).get("expires_at");
+        LocalDateTime after = before.plusDays(days);
+        if (subscriptions.isEmpty()) {
+            jdbc.update("""
+                    INSERT INTO user_vip_subscription
+                      (user_id, plan_code, status, starts_at, expires_at, credit_amount, remaining_credit, payment_order_no)
+                    VALUES (?, 'admin_vip', 'active', ?, ?, 0, 0, ?)
+                    """, targetUserId, now, after, number("A"));
+        } else {
+            jdbc.update("UPDATE user_vip_subscription SET expires_at = ? WHERE id = ?",
+                    after, subscriptions.get(0).get("id"));
+        }
+        jdbc.update("""
+                INSERT INTO audit_log (actor_type, actor_id, action, target, ip, user_agent, detail)
+                VALUES ('admin', ?, 'vip_extended', ?, ?, ?, ?)
+                """, String.valueOf(adminId), "user:" + targetUserId,
+                ip == null ? "" : ip.trim(), userAgent == null ? "" : userAgent,
+                "days=" + days + ", before=" + before + ", after=" + after + ", reason=" + normalizedReason);
+        return Map.of("userId", targetUserId, "days", days, "beforeExpiresAt", before,
+                "expiresAt", after, "reason", normalizedReason);
+    }
+
+    @Transactional
     public void approveRefund(String refundNo, long adminId) {
         Map<String, Object> refund = oneForUpdate("SELECT * FROM payment_refund WHERE refund_no = ? FOR UPDATE", refundNo);
         if (!"needs_manual".equals(refund.get("status"))) throw new BusinessException(40911, "该退款不需要人工处理");
-        holdRefundCreditsIfNeeded(refund);
+        holdRefundBenefitsIfNeeded(refund);
         PaymentGateway.RefundResult result = gateway(String.valueOf(refund.get("channel"))).refund(
                 String.valueOf(refund.get("order_no")), refundNo, intValue(refund.get("amount_fen")),
                 String.valueOf(refund.get("reason")));
@@ -287,7 +367,7 @@ public class PaymentService {
         if (!"processing".equals(refund.get("status")) || amountFen != intValue(refund.get("amount_fen"))) {
             throw new BusinessException(40911, "退款回调状态或金额不一致");
         }
-        holdRefundCreditsIfNeeded(refund);
+        holdRefundBenefitsIfNeeded(refund);
         finalizeRefund(refundNo, String.valueOf(refund.get("order_no")), channelRefundNo,
                 String.valueOf(refund.get("reason")));
     }
@@ -298,9 +378,7 @@ public class PaymentService {
         if (!"needs_manual".equals(refund.get("status"))) throw new BusinessException(40911, "该退款不需要人工处理");
         String rejectionReason = requiredReason(reason);
         String orderNo = String.valueOf(refund.get("order_no"));
-        if (refundCreditsHeld(orderNo)) {
-            restoreRefundCredits(String.valueOf(refund.get("user_id")), intValue(refund.get("credit_amount")), orderNo);
-        }
+        restoreRefundBenefits(refund);
         jdbc.update("""
                 UPDATE payment_order SET status = 'refund_rejected', remaining_credit = credit_amount
                 WHERE order_no = ? AND status = 'refund_processing'
@@ -313,7 +391,7 @@ public class PaymentService {
 
     @Transactional
     public boolean consume(String userId, String featureCode) {
-        ensureTrial(userId);
+        ensureAccount(userId);
         int updated = jdbc.update("""
                 UPDATE ai_credit_account
                 SET balance = balance - 1, consumed_total = consumed_total + 1, version = version + 1
@@ -344,6 +422,10 @@ public class PaymentService {
 
     private void finalizeRefund(String refundNo, String orderNo, String channelRefundNo, String reason) {
         jdbc.update("""
+                UPDATE user_vip_subscription SET status = 'refunded', remaining_credit = 0
+                WHERE payment_order_no = ? AND status = 'refund_processing'
+                """, orderNo);
+        jdbc.update("""
                 UPDATE payment_order SET status = 'refunded', remaining_credit = 0,
                   refund_amount_fen = amount_fen, refund_reason = ?, refunded_at = NOW(3)
                 WHERE order_no = ? AND status = 'refund_processing'
@@ -359,24 +441,52 @@ public class PaymentService {
         return "支付渠道结果不确定，请人工核对后使用原退款单号重试";
     }
 
-    private void holdRefundCreditsIfNeeded(Map<String, Object> refund) {
+    private void holdRefundBenefitsIfNeeded(Map<String, Object> refund) {
         String orderNo = String.valueOf(refund.get("order_no"));
-        if (refundCreditsHeld(orderNo)) return;
+        if (refundBenefitsHeld(orderNo)) return;
         Map<String, Object> order = oneForUpdate("SELECT * FROM payment_order WHERE order_no = ? FOR UPDATE", orderNo);
         validateRefundable(order);
-        removeCredits(String.valueOf(refund.get("user_id")), intValue(refund.get("credit_amount")), "refund", orderNo);
+        holdRefundBenefits(order);
         jdbc.update("""
                 UPDATE payment_order SET status = 'refund_processing', remaining_credit = 0,
                   refund_reason = ? WHERE order_no = ? AND status = 'paid'
                 """, refund.get("reason"), orderNo);
     }
 
-    private boolean refundCreditsHeld(String orderNo) {
+    private boolean refundBenefitsHeld(String orderNo) {
+        Integer vipCount = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM user_vip_subscription
+                WHERE payment_order_no = ? AND status = 'refund_processing'
+                """, Integer.class, orderNo);
+        if (vipCount != null && vipCount > 0) return true;
         Integer count = jdbc.queryForObject("""
                 SELECT COUNT(*) FROM ai_credit_ledger
                 WHERE source_order_no = ? AND reason = 'refund'
                 """, Integer.class, orderNo);
         return count != null && count > 0;
+    }
+
+    private void holdRefundBenefits(Map<String, Object> order) {
+        String orderNo = String.valueOf(order.get("order_no"));
+        if (isVipProduct(String.valueOf(order.get("product_code")))) {
+            jdbc.update("""
+                    UPDATE user_vip_subscription SET status = 'refund_processing'
+                    WHERE payment_order_no = ? AND status = 'active'
+                    """, orderNo);
+            return;
+        }
+        removeCredits(String.valueOf(order.get("user_id")), intValue(order.get("credit_amount")), "refund", orderNo);
+    }
+
+    private void restoreRefundBenefits(Map<String, Object> refund) {
+        String orderNo = String.valueOf(refund.get("order_no"));
+        int restored = jdbc.update("""
+                UPDATE user_vip_subscription SET status = 'active'
+                WHERE payment_order_no = ? AND status = 'refund_processing'
+                """, orderNo);
+        if (restored == 0 && refundBenefitsHeld(orderNo)) {
+            restoreRefundCredits(String.valueOf(refund.get("user_id")), intValue(refund.get("credit_amount")), orderNo);
+        }
     }
 
     private void validateRefundable(Map<String, Object> order) {
@@ -388,21 +498,14 @@ public class PaymentService {
         if (intValue(order.get("remaining_credit")) != intValue(order.get("credit_amount"))) {
             throw new BusinessException(40914, "该订单次数已使用，不支持退款");
         }
-    }
-
-    private void ensureTrial(String userId) {
-        ensureAccount(userId);
-        int updated = jdbc.update("""
-                UPDATE ai_credit_account
-                SET balance = balance + ?, granted_total = granted_total + ?, trial_granted = 1, version = version + 1
-                WHERE user_id = ? AND trial_granted = 0
-                """, TRIAL_CREDITS, TRIAL_CREDITS, userId);
-        if (updated == 1) {
-            int balance = jdbc.queryForObject("SELECT balance FROM ai_credit_account WHERE user_id = ?", Integer.class, userId);
-            jdbc.update("""
-                    INSERT INTO ai_credit_ledger (user_id, change_amount, balance_after, reason)
-                    VALUES (?, ?, ?, 'trial')
-                    """, userId, TRIAL_CREDITS, balance);
+        if (isVipProduct(String.valueOf(order.get("product_code")))) {
+            Integer used = jdbc.queryForObject("""
+                    SELECT COALESCE(MAX(benefit_used), 0) FROM user_vip_subscription
+                    WHERE payment_order_no = ?
+                    """, Integer.class, order.get("order_no"));
+            if (used != null && used > 0) {
+                throw new BusinessException(40914, "VIP 权益已使用，不支持退款");
+            }
         }
     }
 
@@ -424,6 +527,57 @@ public class PaymentService {
                 INSERT INTO ai_credit_ledger (user_id, change_amount, balance_after, reason, source_order_no, feature_code)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """, userId, amount, balance, reason, orderNo, feature);
+    }
+
+    private void activateVip(String userId, String productCode, int credits, String orderNo) {
+        int days = switch (productCode) {
+            case "vip_month" -> 30;
+            case "vip_quarter" -> 90;
+            case "vip_year" -> 365;
+            default -> 0;
+        };
+        LocalDateTime now = LocalDateTime.now();
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT expires_at FROM user_vip_subscription
+                WHERE user_id = ? AND status = 'active' AND expires_at > NOW(3)
+                ORDER BY expires_at DESC LIMIT 1 FOR UPDATE
+                """, userId);
+        LocalDateTime startsAt = rows.isEmpty() ? now : (LocalDateTime) rows.get(0).get("expires_at");
+        LocalDateTime expiresAt = startsAt.plusDays(days);
+        jdbc.update("""
+                INSERT INTO user_vip_subscription
+                    (user_id, plan_code, status, starts_at, expires_at, credit_amount,
+                     remaining_credit, payment_order_no)
+                VALUES (?, ?, 'active', ?, ?, ?, ?, ?)
+                """, userId, productCode, startsAt, expiresAt, credits, credits, orderNo);
+    }
+
+    private boolean isVipProduct(String productCode) { return productCode.startsWith("vip_"); }
+
+    public boolean isVipActive(String userId) {
+        Integer value = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM user_vip_subscription
+                WHERE user_id = ? AND status = 'active'
+                  AND starts_at <= NOW(3) AND expires_at > NOW(3)
+                """, Integer.class, userId);
+        return value != null && value > 0;
+    }
+
+    public void markVipBenefitUsed(String userId) {
+        jdbc.update("""
+                UPDATE user_vip_subscription SET benefit_used = 1
+                WHERE user_id = ? AND status = 'active'
+                  AND starts_at <= NOW(3) AND expires_at > NOW(3)
+                """, userId);
+    }
+
+    public int creditBalance(String userId) { return accountBalance(userId); }
+
+    private int accountBalance(String userId) {
+        ensureAccount(userId);
+        Integer value = jdbc.queryForObject(
+                "SELECT balance FROM ai_credit_account WHERE user_id = ?", Integer.class, userId);
+        return value == null ? 0 : value;
     }
 
     private void removeCredits(String userId, int amount, String reason, String orderNo) {

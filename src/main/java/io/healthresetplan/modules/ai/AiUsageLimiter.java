@@ -18,9 +18,9 @@ public class AiUsageLimiter {
 
     public enum Type {
         CHAT("chat", 66),
-        PLAN("plan", 3),
+        PLAN("plan", 10),
         REPORT("report", 5),
-        IMAGE("image", 5);
+        IMAGE("image", 12);
 
         private final String key;
         private final int limit;

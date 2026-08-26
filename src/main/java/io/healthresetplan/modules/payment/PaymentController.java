@@ -3,6 +3,7 @@ package io.healthresetplan.modules.payment;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.healthresetplan.common.result.R;
+import io.healthresetplan.modules.membership.AiEntitlementService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -18,10 +19,15 @@ import java.util.Map;
 public class PaymentController {
     private static final Logger log = LoggerFactory.getLogger(PaymentController.class);
     private final PaymentService service;
+    private final AiEntitlementService entitlementService;
     private final ObjectMapper objectMapper;
 
-    public PaymentController(PaymentService service, ObjectMapper objectMapper) {
+    public PaymentController(
+            PaymentService service,
+            AiEntitlementService entitlementService,
+            ObjectMapper objectMapper) {
         this.service = service;
+        this.entitlementService = entitlementService;
         this.objectMapper = objectMapper;
     }
 
@@ -30,6 +36,12 @@ public class PaymentController {
 
     @GetMapping("/ai-credits/balance")
     public R<?> balance() { return R.ok(service.balance(currentUserId())); }
+
+    @GetMapping("/ai-credits/vip-status")
+    public R<?> vipStatus() { return R.ok(service.vipStatus(currentUserId())); }
+
+    @GetMapping("/ai-credits/entitlements")
+    public R<?> entitlements() { return R.ok(entitlementService.status(currentUserId())); }
 
     @GetMapping("/ai-credits/ledger")
     public R<?> ledger() { return R.ok(service.ledger(currentUserId())); }

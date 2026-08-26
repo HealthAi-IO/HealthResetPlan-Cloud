@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -29,6 +30,10 @@ public class AiHealthContextService {
     }
 
     public HealthContext build(String userId, boolean personalized) {
+        return build(userId, personalized, "");
+    }
+
+    public HealthContext build(String userId, boolean personalized, String question) {
         if (!personalized) return HealthContext.empty();
         Map<String, Object> data = userDataService.load(userId).data();
         List<String> sections = new ArrayList<>();
@@ -36,14 +41,14 @@ public class AiHealthContextService {
 
         appendProfile(rows(data, "user_profile"), sections, sources);
         appendMemories(rows(data, "ai_memory"), sections, sources);
-        appendIndicators(rows(data, "health_indicator"), sections, sources);
-        appendMeals(rows(data, "meal_record"), sections, sources);
-        appendTodayPlans(rows(data, "plan"), sections, sources);
-        appendClockRecords(rows(data, "clock_record"), sections, sources);
+        appendIndicators(rows(data, "health_indicator"), question, sections, sources);
+        appendMeals(rows(data, "meal_record"), question, sections, sources);
+        appendTodayPlans(rows(data, "plan"), question, sections, sources);
+        appendClockRecords(rows(data, "clock_record"), question, sections, sources);
         appendReminders(rows(data, "reminder"), sections, sources);
-        appendReports(rows(data, "health_report"), sections, sources);
+        appendReports(rows(data, "health_report"), question, sections, sources);
         appendWeeklyReports(rows(data, "ai_weekly_report"), sections, sources);
-        appendQuitSmoking(rows(data, "smoking_event"), sections, sources);
+        appendQuitSmoking(rows(data, "smoking_event"), question, sections, sources);
 
         if (sections.isEmpty()) return HealthContext.empty();
         return new HealthContext(String.join("\n", sections), List.copyOf(sources));
@@ -83,7 +88,8 @@ public class AiHealthContextService {
         }
     }
 
-    private void appendIndicators(List<Map<String, Object>> rows, List<String> sections, List<String> sources) {
+    private void appendIndicators(List<Map<String, Object>> rows, String question,
+                                  List<String> sections, List<String> sources) {
         long since = System.currentTimeMillis() - 30 * DAY_MILLIS;
         Map<String, Map<String, Object>> latest = new LinkedHashMap<>();
         rows.stream()
@@ -100,32 +106,159 @@ public class AiHealthContextService {
             sections.add("【近30天最新健康指标】" + String.join("；", values));
             sources.add("近30天健康指标");
         }
+
+        DateRange requested = indicatorDateRange(question);
+        if (requested == null || !asksForStatistics(question)) return;
+        appendIndicatorStatistics(rows, requested, sections, sources);
     }
 
-    private void appendMeals(List<Map<String, Object>> rows, List<String> sections, List<String> sources) {
-        long since = System.currentTimeMillis() - 30 * DAY_MILLIS;
-        List<Map<String, Object>> recent = rows.stream()
-                .filter(row -> longValue(row.get("eaten_at")) >= since)
-                .sorted(Comparator.comparingLong(row -> -longValue(row.get("eaten_at"))))
-                .limit(18)
+    private void appendIndicatorStatistics(List<Map<String, Object>> rows, DateRange requested,
+                                           List<String> sections, List<String> sources) {
+        List<Map<String, Object>> matched = rows.stream()
+                .filter(row -> longValue(row.get("measured_at")) >= requested.startMillis
+                        && longValue(row.get("measured_at")) < requested.endMillis)
                 .toList();
-        if (recent.isEmpty()) return;
-        double calories = recent.stream().mapToDouble(row -> doubleValue(row.get("total_calories"))).sum();
-        List<String> meals = recent.stream().limit(10).map(row ->
-                date(longValue(row.get("eaten_at"))) + " "
-                        + limited(row.get("meal_type"), 16) + " "
-                        + limited(row.get("name"), 40) + " "
-                        + Math.round(doubleValue(row.get("total_calories"))) + "kcal"
-        ).toList();
-        sections.add("【近30天饮食】共" + recent.size() + "次，记录热量合计约" + Math.round(calories)
-                + "kcal；最近记录=" + String.join("；", meals));
-        sources.add("近30天饮食记录");
+        List<String> statistics = new ArrayList<>();
+        for (String type : List.of("bp", "weight", "sleep")) {
+            List<Map<String, Object>> typed = matched.stream()
+                    .filter(row -> type.equals(String.valueOf(row.get("type"))))
+                    .toList();
+            if (typed.isEmpty()) continue;
+            List<Double> values = typed.stream().map(row -> indicatorValue(row, type))
+                    .filter(value -> value != null).toList();
+            if (values.isEmpty()) continue;
+            double first = values.get(values.size() - 1);
+            double last = values.get(0);
+            statistics.add(indicatorLabel(type) + "记录" + values.size() + "次，最低"
+                    + formatNumber(values.stream().mapToDouble(Double::doubleValue).min().orElse(0))
+                    + "，最高" + formatNumber(values.stream().mapToDouble(Double::doubleValue).max().orElse(0))
+                    + "，平均" + formatNumber(values.stream().mapToDouble(Double::doubleValue).average().orElse(0))
+                    + "，变化" + signed(formatNumber(last - first)));
+        }
+        if (!statistics.isEmpty()) {
+            sections.add("【" + requested.label + "健康指标统计】" + String.join("；", statistics));
+            sources.add(requested.label + "健康指标统计");
+        } else {
+            sections.add("【" + requested.label + "健康指标统计】记录不足，无法判断趋势");
+            sources.add(requested.label + "健康指标统计");
+        }
     }
 
-    private void appendClockRecords(List<Map<String, Object>> rows, List<String> sections, List<String> sources) {
-        long since = System.currentTimeMillis() - 30 * DAY_MILLIS;
+    private Double indicatorValue(Map<String, Object> row, String type) {
+        Map<String, Object> payload = jsonMap(row.get("payload_json"));
+        return switch (type) {
+            case "bp" -> doubleOrNull(payload.get("systolic"));
+            case "weight" -> doubleOrNull(payload.get("weightKg"));
+            case "sleep" -> doubleOrNull(payload.get("sleepHours"));
+            default -> null;
+        };
+    }
+
+    private String indicatorLabel(String type) {
+        return switch (type) {
+            case "bp" -> "收缩压";
+            case "weight" -> "体重kg";
+            case "sleep" -> "睡眠小时";
+            default -> type;
+        };
+    }
+
+    private boolean asksForStatistics(String question) {
+        return containsAny(question == null ? "" : question, "最高", "最低", "平均", "变化", "趋势", "对比");
+    }
+
+    private DateRange indicatorDateRange(String question) {
+        String text = question == null ? "" : question.trim();
+        if (text.isBlank() || !containsAny(text, "血压", "体重", "睡眠", "指标", "健康数据")) return null;
+        LocalDate today = LocalDate.now(ZONE);
+        if (containsAny(text, "上周", "上一周")) {
+            LocalDate start = today.minusDays(today.getDayOfWeek().getValue() + 6L);
+            return range(start, start.plusDays(7), "上周");
+        }
+        if (containsAny(text, "本周", "这周", "这一周")) {
+            return range(today.minusDays(today.getDayOfWeek().getValue() - 1L), today.plusDays(1), "本周");
+        }
+        if (containsAny(text, "最近30天", "近30天", "过去30天")) {
+            return range(today.minusDays(29), today.plusDays(1), "最近30天");
+        }
+        if (containsAny(text, "昨天", "昨日")) return dayRange(today.minusDays(1), "昨天");
+        if (containsAny(text, "今天", "今日")) return dayRange(today, "今天");
+        return null;
+    }
+
+    private void appendMeals(List<Map<String, Object>> rows, String question,
+                             List<String> sections, List<String> sources) {
+        DateRange requested = mealDateRange(question);
+        long since = requested == null ? System.currentTimeMillis() - 30 * DAY_MILLIS : requested.startMillis;
+        long until = requested == null ? Long.MAX_VALUE : requested.endMillis;
+        List<Map<String, Object>> recent = rows.stream()
+                .filter(row -> longValue(row.get("eaten_at")) >= since
+                        && longValue(row.get("eaten_at")) < until)
+                .sorted(Comparator.comparingLong(row -> -longValue(row.get("eaten_at"))))
+                .limit(requested == null ? 18 : 30)
+                .toList();
+        if (recent.isEmpty()) {
+            if (requested != null) {
+                sections.add("【" + requested.label + "饮食】没有找到已保存的饮食记录");
+                sources.add(requested.label + "饮食记录");
+            }
+            return;
+        }
+        double calories = recent.stream().mapToDouble(row -> doubleValue(row.get("total_calories"))).sum();
+        List<String> meals = recent.stream().limit(requested == null ? 10 : 30)
+                .map(this::mealSummary).toList();
+        String label = requested == null ? "近30天" : requested.label;
+        sections.add("【" + label + "饮食】共" + recent.size() + "次，记录热量合计约" + Math.round(calories)
+                + "kcal；记录=" + String.join("；", meals));
+        sources.add(label + "饮食记录");
+    }
+
+    private String mealSummary(Map<String, Object> row) {
+        StringBuilder text = new StringBuilder(dateTime(longValue(row.get("eaten_at"))))
+                .append(" ").append(mealType(row.get("meal_type")))
+                .append(" ").append(limited(row.get("name"), 40))
+                .append(" ").append(Math.round(doubleValue(row.get("total_calories")))).append("kcal");
+        List<String> foods = jsonList(row.get("foods_json")).stream()
+                .map(food -> limited(food.get("name"), 30))
+                .filter(value -> !value.isBlank()).limit(12).toList();
+        if (!foods.isEmpty()) text.append("，食物=").append(String.join("、", foods));
+        String note = limited(row.get("note"), 80);
+        if (!note.isBlank()) text.append("，备注=").append(note);
+        return text.toString();
+    }
+
+    private DateRange mealDateRange(String question) {
+        String text = question == null ? "" : question.trim();
+        if (text.isBlank() || !containsAny(text, "吃", "饮食", "早餐", "午餐", "晚餐", "加餐", "夜宵", "餐食")) return null;
+        LocalDate today = LocalDate.now(ZONE);
+        if (containsAny(text, "前天")) return dayRange(today.minusDays(2), "前天");
+        if (containsAny(text, "昨天", "昨日")) return dayRange(today.minusDays(1), "昨天");
+        if (containsAny(text, "今天", "今日")) return dayRange(today, "今天");
+        if (containsAny(text, "近7天", "最近7天", "最近一周", "过去一周")) {
+            return range(today.minusDays(6), today.plusDays(1), "近7天");
+        }
+        return null;
+    }
+
+    private DateRange dayRange(LocalDate date, String label) { return range(date, date.plusDays(1), label); }
+
+    private DateRange range(LocalDate start, LocalDate end, String label) {
+        return new DateRange(start.atStartOfDay(ZONE).toInstant().toEpochMilli(),
+                end.atStartOfDay(ZONE).toInstant().toEpochMilli(), label);
+    }
+
+    private boolean containsAny(String text, String... values) {
+        for (String value : values) if (text.contains(value)) return true;
+        return false;
+    }
+
+    private void appendClockRecords(List<Map<String, Object>> rows, String question,
+                                    List<String> sections, List<String> sources) {
+        DateRange requested = generalDateRange(question);
+        long since = requested == null ? System.currentTimeMillis() - 30 * DAY_MILLIS : requested.startMillis;
+        long until = requested == null ? Long.MAX_VALUE : requested.endMillis;
         List<String> records = rows.stream()
-                .filter(row -> longValue(row.get("clock_at")) >= since)
+                .filter(row -> longValue(row.get("clock_at")) >= since && longValue(row.get("clock_at")) < until)
                 .sorted(Comparator.comparingLong(row -> -longValue(row.get("clock_at"))))
                 .limit(24)
                 .map(row -> date(longValue(row.get("clock_at"))) + " "
@@ -133,8 +266,9 @@ public class AiHealthContextService {
                         + limited(row.get("note"), 80) + " 状态=" + limited(row.get("status"), 16))
                 .toList();
         if (!records.isEmpty()) {
-            sections.add("【近30天健康打卡】" + String.join("；", records));
-            sources.add("近30天健康打卡");
+            String label = requested == null ? "近30天" : requested.label;
+            sections.add("【" + label + "健康打卡】" + String.join("；", records));
+            sources.add(label + "健康打卡");
         }
     }
 
@@ -150,16 +284,25 @@ public class AiHealthContextService {
         }
     }
 
-    private void appendReports(List<Map<String, Object>> rows, List<String> sections, List<String> sources) {
+    private void appendReports(List<Map<String, Object>> rows, String question,
+                               List<String> sections, List<String> sources) {
+        DateRange requested = generalDateRange(question);
         List<String> reports = rows.stream()
+                .filter(row -> requested == null
+                        || (longValue(row.get("report_time")) >= requested.startMillis
+                        && longValue(row.get("report_time")) < requested.endMillis))
                 .sorted(Comparator.comparingLong(row -> -longValue(row.get("updated_at"))))
                 .limit(8)
                 .map(row -> date(longValue(row.get("report_time"))) + "：" + limited(row.get("summary"), 160))
                 .filter(value -> !value.endsWith("："))
                 .toList();
         if (!reports.isEmpty()) {
-            sections.add("【健康报告】" + String.join("；", reports));
-            sources.add("健康报告");
+            String label = requested == null ? "健康报告" : requested.label + "健康报告";
+            sections.add("【" + label + "】" + String.join("；", reports));
+            sources.add(label);
+        } else if (requested != null && containsAny(question, "报告")) {
+            sections.add("【" + requested.label + "健康报告】没有找到已保存的报告");
+            sources.add(requested.label + "健康报告");
         }
     }
 
@@ -177,33 +320,61 @@ public class AiHealthContextService {
         }
     }
 
-    private void appendQuitSmoking(List<Map<String, Object>> rows, List<String> sections, List<String> sources) {
-        long since = System.currentTimeMillis() - 30 * DAY_MILLIS;
+    private void appendQuitSmoking(List<Map<String, Object>> rows, String question,
+                                   List<String> sections, List<String> sources) {
+        DateRange requested = generalDateRange(question);
+        long since = requested == null ? System.currentTimeMillis() - 30 * DAY_MILLIS : requested.startMillis;
+        long until = requested == null ? Long.MAX_VALUE : requested.endMillis;
         List<String> events = rows.stream()
-                .filter(row -> longValue(row.get("occurred_at")) >= since)
+                .filter(row -> longValue(row.get("occurred_at")) >= since && longValue(row.get("occurred_at")) < until)
                 .sorted(Comparator.comparingLong(row -> -longValue(row.get("occurred_at"))))
                 .limit(20)
                 .map(row -> date(longValue(row.get("occurred_at"))) + "：" + limited(row.get("note"), 100))
                 .toList();
         if (!events.isEmpty()) {
-            sections.add("【近30天戒烟记录】" + String.join("；", events));
-            sources.add("近30天戒烟记录");
+            String label = requested == null ? "近30天" : requested.label;
+            sections.add("【" + label + "戒烟记录】" + String.join("；", events));
+            sources.add(label + "戒烟记录");
         }
     }
 
-    private void appendTodayPlans(List<Map<String, Object>> rows, List<String> sections, List<String> sources) {
+    private void appendTodayPlans(List<Map<String, Object>> rows, String question,
+                                  List<String> sections, List<String> sources) {
         LocalDate today = LocalDate.now(ZONE);
+        DateRange requested = generalDateRange(question);
+        LocalDate start = requested == null ? today : localDate(requested.startMillis);
+        LocalDate end = requested == null ? today.plusDays(1) : localDate(requested.endMillis);
         List<String> plans = rows.stream()
-                .filter(row -> today.equals(localDate(longValue(row.get("plan_date")))))
+                .filter(row -> {
+                    LocalDate date = localDate(longValue(row.get("plan_date")));
+                    return date != null && !date.isBefore(start) && date.isBefore(end);
+                })
                 .limit(8)
                 .map(row -> limited(row.get("type"), 20) + "："
                         + limited(jsonMap(row.get("payload_json")).get("summary"), 120))
                 .filter(value -> !value.endsWith("："))
                 .toList();
         if (!plans.isEmpty()) {
-            sections.add("【今日健康计划】" + String.join("；", plans));
-            sources.add("今日健康计划");
+            String label = requested == null ? "今日" : requested.label;
+            sections.add("【" + label + "健康计划】" + String.join("；", plans));
+            sources.add(label + "健康计划");
         }
+    }
+
+    private DateRange generalDateRange(String question) {
+        String text = question == null ? "" : question;
+        LocalDate today = LocalDate.now(ZONE);
+        if (containsAny(text, "上周", "上一周")) {
+            LocalDate start = today.minusDays(today.getDayOfWeek().getValue() + 6L);
+            return range(start, start.plusDays(7), "上周");
+        }
+        if (containsAny(text, "本周", "这周", "这一周"))
+            return range(today.minusDays(today.getDayOfWeek().getValue() - 1L), today.plusDays(1), "本周");
+        if (containsAny(text, "最近30天", "近30天", "过去30天"))
+            return range(today.minusDays(29), today.plusDays(1), "最近30天");
+        if (containsAny(text, "昨天", "昨日")) return dayRange(today.minusDays(1), "昨天");
+        if (containsAny(text, "今天", "今日")) return dayRange(today, "今天");
+        return null;
     }
 
     @SuppressWarnings("unchecked")
@@ -228,6 +399,23 @@ public class AiHealthContextService {
         } catch (Exception ignored) {
             return Map.of();
         }
+    }
+
+    private List<Map<String, Object>> jsonList(Object value) {
+        Object parsed = value;
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                parsed = objectMapper.readValue(text, new TypeReference<List<Map<String, Object>>>() {});
+            } catch (Exception ignored) {
+                return List.of();
+            }
+        }
+        if (!(parsed instanceof List<?> list)) return List.of();
+        return list.stream().filter(Map.class::isInstance).map(item -> {
+            Map<String, Object> result = new LinkedHashMap<>();
+            ((Map<?, ?>) item).forEach((key, field) -> result.put(String.valueOf(key), field));
+            return result;
+        }).toList();
     }
 
     private void add(List<String> values, String label, Object value) {
@@ -259,6 +447,25 @@ public class AiHealthContextService {
         }
     }
 
+    private Double doubleOrNull(Object value) {
+        if (value instanceof Number number) return number.doubleValue();
+        try {
+            return value == null ? null : Double.parseDouble(String.valueOf(value));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String formatNumber(double value) {
+        return Math.abs(value - Math.rint(value)) < 0.01
+                ? String.valueOf(Math.round(value))
+                : String.format(java.util.Locale.ROOT, "%.1f", value);
+    }
+
+    private String signed(String value) {
+        return value.startsWith("-") || "0".equals(value) ? value : "+" + value;
+    }
+
     private Long parseLong(Object value) {
         try {
             return Long.parseLong(String.valueOf(value));
@@ -277,9 +484,27 @@ public class AiHealthContextService {
         return Instant.ofEpochMilli(epochMillis).atZone(ZONE).toLocalDate();
     }
 
+    private String dateTime(long epochMillis) {
+        if (epochMillis <= 0) return "日期未知";
+        return Instant.ofEpochMilli(epochMillis).atZone(ZONE)
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+    }
+
+    private String mealType(Object value) {
+        return switch (String.valueOf(value)) {
+            case "breakfast" -> "早餐";
+            case "dinner" -> "晚餐";
+            case "snack" -> "加餐";
+            case "late_night" -> "夜宵";
+            default -> "午餐";
+        };
+    }
+
     public record HealthContext(String prompt, List<String> sources) {
         static HealthContext empty() {
             return new HealthContext("", List.of());
         }
     }
+
+    private record DateRange(long startMillis, long endMillis, String label) {}
 }

@@ -36,7 +36,7 @@ public class AiConsentService {
         jdbc.update("""
                 INSERT INTO ai_user_consent (user_id, policy_version, accepted_at, revoked_at)
                 VALUES (?, ?, ?, NULL)
-                ON DUPLICATE KEY UPDATE accepted_at = VALUES(accepted_at), revoked_at = NULL
+                ON DUPLICATE KEY UPDATE policy_version = VALUES(policy_version), accepted_at = VALUES(accepted_at), revoked_at = NULL
                 """, userId, POLICY_VERSION, LocalDateTime.now());
     }
 

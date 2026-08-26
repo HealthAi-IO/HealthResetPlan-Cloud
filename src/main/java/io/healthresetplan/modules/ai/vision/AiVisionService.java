@@ -69,6 +69,10 @@ public class AiVisionService {
 
     private Map<String, Object> analyzeBytes(
             String userId, byte[] bytes, String mimeType, String normalizedType) {
+        String feature = "meal".equals(normalizedType)
+                ? "meal_analysis"
+                : "ai_vision_" + normalizedType;
+        membershipService.requireCredit(userId, feature);
         usageLimiter.consume(userId, AiUsageLimiter.Type.IMAGE);
         try {
             OneApiService.VisionCompletion completion = oneApiService.analyzeImage(
@@ -82,7 +86,7 @@ public class AiVisionService {
             result.put("type", normalizedType);
             result.put("provider", completion.label());
             if (membershipService.billingEnabled()
-                    && !membershipService.consume(userId, "meal".equals(normalizedType) ? "meal_analysis" : "ai_vision")) {
+                    && !membershipService.consume(userId, feature)) {
                 throw new BusinessException(42903, "AI 健康权益已用完，请充值后继续使用");
             }
             return result;

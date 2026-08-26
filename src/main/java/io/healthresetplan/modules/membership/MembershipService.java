@@ -11,19 +11,24 @@ import org.springframework.stereotype.Service;
 public class MembershipService {
 
     private final PaymentService paymentService;
+    private final AiEntitlementService entitlementService;
 
-    public MembershipService(PaymentService paymentService) {
+    public MembershipService(PaymentService paymentService, AiEntitlementService entitlementService) {
         this.paymentService = paymentService;
+        this.entitlementService = entitlementService;
     }
 
     public boolean hasFeature(String userId, String feature) {
-        return userId != null && !userId.isBlank() && paymentService.hasAvailable(userId);
+        return userId != null && !userId.isBlank()
+                && (entitlementService.hasIncluded(userId, feature)
+                || paymentService.hasAvailable(userId));
     }
 
     public boolean billingEnabled() { return true; }
 
     public boolean consume(String userId, String feature) {
-        return paymentService.consume(userId, feature);
+        return entitlementService.consumeIncluded(userId, feature)
+                || paymentService.consume(userId, feature);
     }
 
     public void requireCredit(String userId, String feature) {

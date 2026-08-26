@@ -71,9 +71,10 @@ class AiPlanServiceTests {
     void allProvidersFailReturnsLocalSafePlan() {
         OneApiService oneApiService = mock(OneApiService.class);
         AiUsageLimiter usageLimiter = mock(AiUsageLimiter.class);
+        MembershipService membershipService = mock(MembershipService.class);
         AiPlanService service = new AiPlanService(
                 oneApiService,
-                mock(MembershipService.class),
+                membershipService,
                 new OneApiProperties(),
                 usageLimiter);
         when(oneApiService.completeJsonWithExactProvider(
@@ -84,6 +85,8 @@ class AiPlanServiceTests {
 
         assertEquals("local", response.provider());
         assertEquals(7, countDays(response.rawJson()));
+        verify(usageLimiter).release("user-1", AiUsageLimiter.Type.PLAN);
+        verify(membershipService, never()).consume(anyString(), anyString());
     }
 
     @ParameterizedTest

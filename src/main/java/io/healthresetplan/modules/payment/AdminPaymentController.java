@@ -43,6 +43,13 @@ public class AdminPaymentController {
                 clientIp(request), request.getHeader("User-Agent")));
     }
 
+    @PostMapping("/vip/extensions")
+    public R<?> extendVip(@Valid @RequestBody ExtendVipRequest body, HttpServletRequest request) {
+        return R.ok(service.extendVip(
+                body.userId(), body.days(), body.reason(), currentAdminId(),
+                clientIp(request), request.getHeader("User-Agent")));
+    }
+
     private String clientIp(HttpServletRequest request) {
         String forwarded = request.getHeader("X-Forwarded-For");
         return forwarded == null || forwarded.isBlank()
@@ -58,5 +65,10 @@ public class AdminPaymentController {
     public record GrantCreditsRequest(
             @NotBlank @Size(max = 64) String userId,
             @NotNull @Min(1) @Max(10000) Integer amount,
+            @NotBlank @Size(min = 2, max = 200) String reason) {}
+
+    public record ExtendVipRequest(
+            @NotBlank @Size(max = 64) String userId,
+            @NotNull @Min(1) @Max(3650) Integer days,
             @NotBlank @Size(min = 2, max = 200) String reason) {}
 }

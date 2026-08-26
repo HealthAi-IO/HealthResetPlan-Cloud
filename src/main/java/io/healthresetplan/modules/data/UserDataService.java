@@ -26,7 +26,7 @@ public class UserDataService {
     private static final Set<String> ALLOWED_TABLES = Set.of(
             "user_profile", "health_indicator", "plan", "clock_record", "reminder",
             "health_report", "ai_weekly_report", "meal_record", "meal_recipe", "meal_settings", "ai_session", "ai_message", "ai_memory",
-            "quit_smoking_profile", "smoking_event");
+            "quit_smoking_profile", "smoking_event", "ai_action_log");
 
     private final UserDataStateMapper mapper;
     private final DataEncryptionService encryption;

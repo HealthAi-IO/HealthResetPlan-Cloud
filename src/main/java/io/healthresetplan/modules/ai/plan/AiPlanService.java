@@ -87,6 +87,7 @@ public class AiPlanService {
         if (safetyReply != null) {
             throw new BusinessException(42201, safetyReply);
         }
+        membershipService.requireCredit(userId, "ai_plan");
 
         List<ChatCompletionMessageParam> messages = List.of(
                 OneApiService.systemMsg(SYSTEM_PROMPT),
@@ -110,7 +111,8 @@ public class AiPlanService {
                 }
             }
             log.warn("All AI plan providers failed userId={}, using local safe plan", userId);
-            return chargeCredit(userId, new AiPlanResponse("local", localSafePlan(req), 0, 0));
+            usageLimiter.release(userId, AiUsageLimiter.Type.PLAN);
+            return new AiPlanResponse("local", localSafePlan(req), 0, 0);
         } catch (RuntimeException e) {
             usageLimiter.release(userId, AiUsageLimiter.Type.PLAN);
             throw e;
