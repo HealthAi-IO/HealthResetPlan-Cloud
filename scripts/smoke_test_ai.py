@@ -122,7 +122,7 @@ def list_plan_users(env):
         SELECT u.user_id, COALESCE(CAST(s.state_value AS SIGNED), 0)
         FROM user_account u
         JOIN ai_user_consent c ON c.user_id = u.user_id
-          AND c.policy_version = '2026-07-17' AND c.revoked_at IS NULL
+          AND c.policy_version = '2026-09-06' AND c.revoked_at IS NULL
         LEFT JOIN app_ephemeral_state s
           ON s.state_key = CONCAT('hrp:ai:usage:', CURRENT_DATE, ':plan:', u.user_id)
           AND s.expires_at > CURRENT_TIMESTAMP(3)

@@ -9,7 +9,7 @@ import java.util.Map;
 
 @Service
 public class AiConsentService {
-    public static final String POLICY_VERSION = "2026-08-24";
+    public static final String POLICY_VERSION = "2026-09-06";
     private final JdbcTemplate jdbc;
 
     public AiConsentService(JdbcTemplate jdbc) { this.jdbc = jdbc; }

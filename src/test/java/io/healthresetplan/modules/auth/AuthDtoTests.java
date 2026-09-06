@@ -17,7 +17,7 @@ class AuthDtoTests {
         PhoneRegisterRequest request = new PhoneRegisterRequest();
         request.setPhone("13800138000");
         request.setRegistrationTicket("ticket");
-        request.setAgreementVersion("2026-07-17");
+        request.setAgreementVersion("2026-09-06");
 
         try (var factory = Validation.buildDefaultValidatorFactory()) {
             Validator validator = factory.getValidator();

@@ -45,7 +45,7 @@ app:
     enabled: ${WEB_PUSH_ENABLED:false}
     public-key: ${WEB_PUSH_PUBLIC_KEY:}
     private-key: ${WEB_PUSH_PRIVATE_KEY:}
-    subject: ${WEB_PUSH_SUBJECT:mailto:support@jkcqplan.com}
+    subject: ${WEB_PUSH_SUBJECT:mailto:caokun@weilingji.com}
   oss:
     access-key-id: ${JDCLOUD_OSS_ACCESS_KEY_ID}
     secret-access-key: ${JDCLOUD_OSS_SECRET_ACCESS_KEY}

@@ -9,7 +9,7 @@ public class WebPushProperties {
     private boolean enabled;
     private String publicKey = "";
     private String privateKey = "";
-    private String subject = "mailto:support@jkcqplan.com";
+    private String subject = "mailto:caokun@weilingji.com";
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

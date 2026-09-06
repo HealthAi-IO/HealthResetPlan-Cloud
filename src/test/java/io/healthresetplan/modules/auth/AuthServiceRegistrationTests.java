@@ -76,7 +76,7 @@ class AuthServiceRegistrationTests {
         request.setRegistrationTicket(ticket);
         request.setNickname("测试用户");
         request.setAgreedToTerms(true);
-        request.setAgreementVersion("2026-07-17");
+        request.setAgreementVersion("2026-09-06");
         return request;
     }
 }

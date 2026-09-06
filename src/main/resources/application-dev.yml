@@ -26,7 +26,7 @@ app:
     enabled: ${WEB_PUSH_ENABLED:false}
     public-key: ${WEB_PUSH_PUBLIC_KEY:}
     private-key: ${WEB_PUSH_PRIVATE_KEY:}
-    subject: ${WEB_PUSH_SUBJECT:mailto:support@jkcqplan.com}
+    subject: ${WEB_PUSH_SUBJECT:mailto:caokun@weilingji.com}
   data-encryption:
     key: ${DATA_ENCRYPTION_KEY:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
     key-version: ${DATA_ENCRYPTION_KEY_VERSION:1}
